@@ -23,6 +23,7 @@
 #include "common/scm_rev.h"
 #include "common/singleton.h"
 #include "common/version.h"
+#include "core/devtools/gdbstub.h"
 #include "core/file_format/psf.h"
 #include "core/file_format/splash.h"
 #include "core/file_format/trp.h"
@@ -249,6 +250,8 @@ void Emulator::Run(const std::filesystem::path& file, const std::vector<std::str
 #endif
 
     linker->Execute(args);
+
+    auto gdb_stub = Devtools::GdbStub();
 
     window->InitTimers();
     while (window->IsOpen()) {
