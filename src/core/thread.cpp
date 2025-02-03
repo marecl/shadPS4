@@ -147,6 +147,7 @@ void NativeThread::Initialize() {
     sig_stack.ss_flags = 0;
     ASSERT_MSG(sigaltstack(&sig_stack, nullptr) == 0, "Failed to set signal stack: {}", errno);
 #endif
+    thread_ids.push_back(tid);
 }
 
 } // namespace Core

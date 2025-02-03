@@ -251,7 +251,7 @@ void Emulator::Run(const std::filesystem::path& file, const std::vector<std::str
 
     linker->Execute(args);
 
-    auto gdb_stub = Devtools::GdbStub();
+    auto gdb_stub = Devtools::GdbStub(42069);
 
     window->InitTimers();
     while (window->IsOpen()) {

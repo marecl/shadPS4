@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "common/types.h"
 
 namespace Libraries::Kernel {
@@ -13,6 +15,9 @@ namespace Core {
 
 using ThreadFunc = void (*)(void*);
 using PthreadFunc = void* (*)(void*);
+
+// For GDB
+inline std::vector<u64> thread_ids;
 
 class NativeThread {
 public:

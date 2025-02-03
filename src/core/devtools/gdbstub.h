@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <thread>
 
@@ -10,11 +11,12 @@ namespace Core::Devtools {
 
 class GdbStub {
 public:
-    GdbStub();
+    explicit GdbStub(u16 port);
     ~GdbStub();
 
 private:
-    int m_socket;
+    u16 m_port;
+    int m_socket{};
     std::jthread m_thread;
     std::string m_recv_buffer;
 
@@ -27,9 +29,55 @@ private:
         Interrupt = '\03',
     };
 
-    // Return a reply for GDB on success
-    std::optional<std::string> ProcessIncomingData(int client);
-    static std::optional<std::string> ProcessCommand(const std::string& command);
+    enum class Register : int {
+        RAX = 0,
+        RBX,
+        RCX,
+        RDX,
+        RSI,
+        RDI,
+        RBP,
+        RSP,
+        R8,
+        R9,
+        R10,
+        R11,
+        R12,
+        R13,
+        R14,
+        R15,
+        RIP,
+        EFLAGS,
+        CS,
+        SS,
+        DS,
+        ES,
+        FS,
+        GS,
+        ST0,
+        ST1,
+        ST2,
+        ST3,
+        ST4,
+        ST5,
+        ST6,
+        ST7,
+        FCTRL,
+        FSTAT,
+        FTAG,
+        FISEG,
+        FIOFF,
+        FOSEG,
+        FOOFF,
+        FOP
+    };
+
+    void CreateSocket();
+
+    std::string ProcessIncomingData(int client);
+    static std::string HandleCommand(const std::string& command);
+
+    static std::string ReadRegisterAsString(Register reg);
 
     void Run(const std::stop_token& stop_token);
 };
