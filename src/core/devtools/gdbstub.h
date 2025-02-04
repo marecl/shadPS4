@@ -29,6 +29,13 @@ private:
         Interrupt = '\03',
     };
 
+    // Taken from xenia
+    struct GDBCommand {
+        std::string cmd{};  // Command
+        std::string data{}; // Full packet
+        // u8 checksum{}; // Checksum
+    };
+
     enum class Register : int {
         RAX = 0,
         RBX,
@@ -54,28 +61,36 @@ private:
         ES,
         FS,
         GS,
-        ST0,
-        ST1,
-        ST2,
-        ST3,
-        ST4,
-        ST5,
-        ST6,
-        ST7,
-        FCTRL,
-        FSTAT,
-        FTAG,
-        FISEG,
-        FIOFF,
-        FOSEG,
-        FOOFF,
-        FOP
     };
+
+    struct Breakpoint {
+        u64 address;
+        u8 original_byte;
+
+        explicit Breakpoint(const u64 address) : address(address) {
+            original_byte = *reinterpret_cast<u8*>(address);
+            Enable();
+        }
+
+        ~Breakpoint() {
+            Disable();
+        }
+
+        void Enable() const {
+            *reinterpret_cast<u8*>(address) = 0xCC;
+        }
+
+        void Disable() const {
+            *reinterpret_cast<u8*>(address) = original_byte;
+        }
+    };
+
+    std::vector<Breakpoint> m_breakpoints;
 
     void CreateSocket();
 
     std::string ProcessIncomingData(int client);
-    static std::string HandleCommand(const std::string& command);
+    std::string HandleCommand(const GDBCommand& command);
 
     static std::string ReadRegisterAsString(Register reg);
 

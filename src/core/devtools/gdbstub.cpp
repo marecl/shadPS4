@@ -1,15 +1,18 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <array>
 #include <unordered_map>
 
 #include <fmt/xchar.h>
 #include <magic_enum/magic_enum_utility.hpp>
 #include <netinet/in.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 
 #include "common/assert.h"
+#include "common/debug.h"
+#include "core/libraries/kernel/kernel.h"
+#include "core/memory.h"
 #include "core/thread.h"
 #include "gdbstub.h"
 
@@ -54,55 +57,198 @@ void GdbStub::CreateSocket() {
 }
 
 std::string GdbStub::ProcessIncomingData(const int client) {
-    std::string buf_str;
-    while (true) {
+    static auto Receive = [&] -> std::string {
         char buf[1024];
         const ssize_t bytes = recv(client, buf, sizeof(buf), 0);
         if (bytes <= 0) {
-            LOG_ERROR(Debug, "Failed to read from client ({})", strerror(errno));
             return "";
         }
 
-        buf_str.append(buf, bytes);
+        return std::string(buf, bytes);
+    };
 
-        if (buf_str.find(PacketStart) != std::string::npos &&
-            buf_str.find(PacketEnd) != std::string::npos) {
-            break;
+    static auto Trim = [&](const std::string& packet) -> std::string {
+        if (packet.front() != PacketStart && packet.front() != Ack ||
+            packet.find(PacketEnd) == std::string::npos) {
+            UNREACHABLE_MSG("Malformed packet '{}'", packet);
         }
+
+        std::string trimmed_packet = packet.substr(1, packet.find(PacketEnd) - 1);
+        if (const size_t colon_pos = trimmed_packet.find(':'); colon_pos != std::string::npos) {
+            trimmed_packet = trimmed_packet.substr(0, colon_pos);
+        }
+        if (const size_t dash_pos = trimmed_packet.find('-'); dash_pos != std::string::npos) {
+            trimmed_packet = trimmed_packet.substr(0, dash_pos);
+        }
+        if (const size_t semicolon_pos = trimmed_packet.find(';');
+            semicolon_pos != std::string::npos) {
+            trimmed_packet = trimmed_packet.substr(0, semicolon_pos);
+        }
+        if (std::isdigit(trimmed_packet[1])) {
+            return std::string(1, trimmed_packet[0]);
+        }
+        return trimmed_packet;
+    };
+
+    auto packet = Receive();
+
+    if (packet.empty()) {
+        return "";
     }
 
-    for (const char c : buf_str) {
-        if (c == PacketStart) {
-            m_recv_buffer.clear();
-        } else if (c == PacketEnd) {
-            return HandleCommand(m_recv_buffer);
-        } else {
-            m_recv_buffer.push_back(c);
-        }
+    if (packet == "+") {
+        // Initial acknowledgement
+        return "+";
     }
 
-    return "";
+    if (packet.front() == Interrupt) {
+        BREAKPOINT();
+    }
+
+    if (packet.front() == '+') {
+        packet = packet.substr(1);
+    }
+
+    const std::string command = Trim(packet);
+
+    LOG_INFO(Debug, "Raw packet '{}'", packet);
+    LOG_INFO(Debug, "Trimmed packet (command) = {}", command);
+
+    return HandleCommand({command, packet});
+}
+
+u8 CalculateChecksum(const std::string& command) {
+    u8 sum = 0;
+    for (const char c : command) {
+        sum += static_cast<uint8_t>(c);
+    }
+    return sum & 0xFF;
 }
 
 static std::string MakeResponse(const std::string& response) {
-    uint8_t checksum = 0;
-    for (const char c : response) {
-        checksum += static_cast<uint8_t>(c);
-    }
-    return "+$" + response + "#" + fmt::format("{:02X}", checksum & 0xFF);
+    return "+$" + response + "#" + fmt::format("{:02X}", CalculateChecksum(response));
 }
 
-std::string GdbStub::HandleCommand(const std::string& command) {
-    LOG_INFO(Debug, "command = {}", command);
+static void EnableStepping() {
+    // Taken from
+    // https://stackoverflow.com/questions/77123145/how-to-create-an-int-1-interrupt-handler-when-the-trap-flag-is-enabled
+    asm volatile("pushf\n\t"            // Push FLAGS onto the stack
+                 "pop %%ax\n\t"         // Pop FLAGS into AX register
+                 "or $0x0100, %%ax\n\t" // Set the Trap Flag (bit 8)
+                 "push %%ax\n\t"        // Push the modified value onto the stack
+                 "popf\n\t"             // Pop it back into FLAGS
+                 :
+                 :
+                 : "ax", "flags" // Clobbers AX and FLAGS
+    );
+}
+
+std::string GdbStub::HandleCommand(const GDBCommand& command) {
+    LOG_INFO(Debug, "command.cmd = {}", command.cmd);
 
     static const std::unordered_map<std::string, std::function<std::string()>> command_table{
-        {"?", [] { return "S05"; }},
-        {"Hg0", [] { return "OK"; }},
-        {"vCont?", [] { return "vCont;c;t"; }},
-        {"qAttached", [] { return "1"; }},
-        {"!", [] { return "OK"; }},
+        {"!", [&] { return "OK"; }},
+        {"?", [&] { return "S05"; }},
+        {"Hg0", [&] { return "OK"; }},
+        {"Z",
+         [&] {
+             const u64 address = std::stoull(command.data.substr(4, 9), nullptr, 16);
+             m_breakpoints.emplace_back(address);
+             return "OK";
+         }},
+        {"g",
+         [&] {
+             int i = 0;
+             std::string regs;
+
+             // TODO: Is there a way to do this with a custom match function?
+             magic_enum::enum_for_each<Register>([&i, &regs](auto val) {
+                 ++i;
+
+                 if (i <= 17) {
+                     constexpr Register reg = val;
+                     regs += ReadRegisterAsString(reg);
+                 }
+             });
+
+             return regs;
+         }},
+        {"Hc",
+         [&] {
+             const auto tid = std::stoi(command.data.substr(4, 1), nullptr, 16);
+             LOG_INFO(Debug, "tid = {}", tid);
+
+             return "OK";
+         }},
+        {"m",
+         [&] {
+             // TODO: Clean this garbage up :(
+
+             if (const size_t comma_pos = command.data.find(','); comma_pos != std::string::npos) {
+                 const u64 address =
+                     std::stoull(command.data.substr(2, comma_pos - 1), nullptr, 16);
+                 const u64 length = std::stoull(command.data.substr(comma_pos + 1), nullptr, 16);
+
+                 static auto mem = Memory::Instance();
+                 std::scoped_lock lck{mem->mutex};
+
+                 bool is_valid_address = false;
+
+                 for (auto [d_addr, d_mem_area] : mem->dmem_map) {
+                     if (address >= d_addr && address + length <= d_addr + d_mem_area.size) {
+                         is_valid_address = true;
+                         break;
+                     }
+                 }
+
+                 for (auto [v_addr, v_mem_area] : mem->vma_map) {
+                     if (address >= v_addr && address + length <= v_addr + v_mem_area.size) {
+                         is_valid_address = true;
+                         break;
+                     }
+                 }
+
+                 if (!is_valid_address) {
+                     LOG_ERROR(Debug, "Invalid address: 0x{:x}", address);
+                     return std::string("E01");
+                 }
+
+                 std::string memory;
+                 for (u64 i = 0; i < length; ++i) {
+                     mprotect(reinterpret_cast<u8*>(address + i), 1, PROT_READ);
+                     memory += fmt::format("{:02x}", *reinterpret_cast<u8*>(address + i));
+                 }
+
+                 return memory;
+             }
+
+             return std::string("E01");
+         }},
+        {"p",
+         [&] {
+             const auto reg = static_cast<Register>(std::stoi(command.data.substr(2), nullptr, 16));
+             return ReadRegisterAsString(reg);
+         }},
+        {"qAttached", [&] { return "1"; }},
+        {"qC", [&] { return fmt::format("QC {:x}", gettid()); }},
+        {"qSupported", [&] { return "PacketSize=1024;qXfer:features:read+;binary-upload+;"; }},
+        {"qTStatus", [&] { return "Trunning;tnotrun:0"; }},
+        {"qXfer",
+         [&] {
+             auto param = command.data;
+             if (param.length() > 0 && param[0] == ':') {
+                 param = param.substr(1);
+             }
+
+             const auto sub_cmd = param.substr(0, param.find(':'));
+             if (sub_cmd == "features") {
+                 return target_description;
+             }
+
+             return "E01";
+         }},
         {"qfThreadInfo",
-         [] {
+         [&] {
              fmt::memory_buffer buf;
              fmt::format_to(std::back_inserter(buf), "m");
 
@@ -117,70 +263,95 @@ std::string GdbStub::HandleCommand(const std::string& command) {
 
              return to_string(buf);
          }},
-        {"qC", [] { return fmt::format("QC {:x}", gettid()); }},
-        {"g",
-         [] {
-             int i = 1;
-             std::string regs;
+        {"vCont?", [&] { return "vCont;c;t"; }},
+        {"vCont", [] { return "OK"; }},
+        {"vMustReplyEmpty", [&] { return ""; }},
+        {"x",
+         [&] {
+             if (const size_t comma_pos = command.data.find(','); comma_pos != std::string::npos) {
+                 const u64 address =
+                     std::stoull(command.data.substr(2, comma_pos - 1), nullptr, 16);
+                 const u64 length = std::stoull(command.data.substr(comma_pos + 1), nullptr, 16);
 
-             // TODO: Is there a way to do this with a custom match function?
-             magic_enum::enum_for_each<Register>([&i, &regs](auto val) {
-                 ++i;
+                 static auto mem = Memory::Instance();
+                 std::scoped_lock lck{mem->mutex};
 
-                 if (i <= static_cast<int>(Register::RIP)) {
-                     constexpr Register reg = val;
-                     regs += ReadRegisterAsString(reg);
+                 bool is_valid_address = false;
+
+                 for (auto [d_addr, d_mem_area] : mem->dmem_map) {
+                     if (address >= d_addr && address + length <= d_addr + d_mem_area.size) {
+                         is_valid_address = true;
+                         break;
+                     }
                  }
-             });
 
-             return regs;
+                 for (auto [v_addr, v_mem_area] : mem->vma_map) {
+                     if (address >= v_addr && address + length <= v_addr + v_mem_area.size) {
+                         is_valid_address = true;
+                         break;
+                     }
+                 }
+
+                 if (!is_valid_address) {
+                     LOG_ERROR(Debug, "Invalid address: 0x{:x}", address);
+                     return std::string("E01");
+                 }
+
+                 std::string memory;
+                 for (u64 i = 0; i < length; ++i) {
+                     mprotect(reinterpret_cast<u8*>(address + i), 1, PROT_READ);
+                     memory += fmt::format("{:02x}", *reinterpret_cast<u8*>(address + i));
+                 }
+
+                 return memory;
+             }
+
+             return std::string("E01");
          }},
-        {"vMustReplyEmpty", [] { return ""; }},
-        {"qTStatus", [] { return "Trunning;tnotrun:0"; }},
+        /*{"z",
+         [&] {
+             const u64 address = std::stoull(command.data.substr(4, 9), nullptr, 16);
+             for (auto it = m_breakpoints.begin(); it != m_breakpoints.end(); ++it) {
+                 if (it->address == address) {
+                     m_breakpoints.erase(it);
+                     return "OK";
+                 }
+             }
+
+             return "E01";
+         }},
+        {"vRun", [&] {
+            EnableStepping();
+            return "OK";
+        }},
+        {"vCont;c",
+         [&] {
+             EnableStepping();
+             return "OK";
+         }},
+        {"c",
+         [&] {
+             EnableStepping();
+             return "S05"; // Stopped
+         }},
+        {"s",
+         [&] {
+             EnableStepping();
+             return "S05"; // Stopped
+         }},
+        {"D",
+         [&] {
+             // Detach
+
+            return "";
+        }}*/
     };
 
-    if (const auto it = command_table.find(command); it != command_table.end()) {
+    if (const auto it = command_table.find(command.cmd); it != command_table.end()) {
         return MakeResponse(it->second());
     }
 
-    // Substring commands...
-
-    if (command.substr(0, 10) == "qSupported") {
-        return MakeResponse("PacketSize=1024;qXfer:features:read+;");
-    }
-
-    if (command.substr(0, 5) == "qXfer") {
-        if (command.substr(6, 8) == "features") {
-            return MakeResponse(target_description);
-        }
-    }
-
-    if (command.size() == 3 && command.at(0) == 'p') {
-        const auto reg = static_cast<Register>(std::stoi(command.substr(1), nullptr, 16));
-        return MakeResponse(ReadRegisterAsString(reg));
-    }
-
-    if (command.size() > 1 && command[0] == 'm') {
-        const auto comma_pos = command.find(',');
-        if (comma_pos != std::string::npos) {
-            const uintptr_t addr = std::stoull(command.substr(1, comma_pos - 1), nullptr, 16);
-            const size_t length = std::stoul(command.substr(comma_pos + 1), nullptr, 16);
-
-            std::vector<uint8_t> buffer(length);
-            if (memcpy(buffer.data(), reinterpret_cast<void*>(addr), length) == nullptr) {
-                LOG_ERROR(Debug, "Memory read failed at address {:x}", addr);
-                return "E03"; // Memory access error
-            }
-
-            std::ostringstream response;
-            response << std::hex << std::setfill('0');
-            for (const uint8_t byte : buffer)
-                response << std::setw(2) << static_cast<int>(byte);
-            return response.str();
-        }
-    }
-
-    LOG_ERROR(Debug, "Unhandled command '{}'", command);
+    LOG_ERROR(Debug, "Unhandled command '{}'", command.cmd);
     return MakeResponse("");
 }
 
@@ -262,7 +433,7 @@ std::string GdbStub::ReadRegisterAsString(const Register reg) {
         asm volatile("mov %%gs, %0" : "=r"(value));
         break;
     default:
-        LOG_ERROR(Debug, "Saying {} is unavailable", magic_enum::enum_name(reg));
+        LOG_ERROR(Debug, "Saying {} is unavailable", static_cast<int>(reg));
         return "xxxxxxxxxxxxxxxx";
     }
 
@@ -272,7 +443,7 @@ std::string GdbStub::ReadRegisterAsString(const Register reg) {
 }
 
 void GdbStub::Run(const std::stop_token& stop_token) {
-    LOG_INFO(Debug, "GDB server listening on port 13378");
+    LOG_INFO(Debug, "GDB server listening on port {}", m_port);
 
     listen(m_socket, 5);
 
@@ -288,14 +459,11 @@ void GdbStub::Run(const std::stop_token& stop_token) {
             continue;
         }
 
-        timeval timeout = {10, 0};
-        setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
         while (!stop_token.stop_requested()) {
             std::string reply = ProcessIncomingData(client);
             if (reply.empty()) {
                 // No data available, can do other work or sleep
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                // std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 break;
             }
 
