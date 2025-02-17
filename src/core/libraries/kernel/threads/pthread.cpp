@@ -205,8 +205,11 @@ static void RunThread(void* arg) {
     Common::SetCurrentThreadName(curthread->name.c_str());
     DebugState.AddCurrentThreadToGuestList();
 
-    /* Run the current thread's start routine with argument: */
     curthread->native_thr.Initialize();
+
+    Core::thread_list[curthread->native_thr.GetTid()] = curthread->name.c_str();
+
+    /* Run the current thread's start routine with argument: */
     void* ret = Core::ExecuteGuest(curthread->start_routine, curthread->arg);
 
     /* Remove thread from tracking */
@@ -268,6 +271,7 @@ int PS4_SYSV_ABI posix_pthread_create_name_np(PthreadT* thread, const PthreadAtt
     auto* memory = Core::Memory::Instance();
     if (name && memory->IsValidAddress(name)) {
         new_thread->name = name;
+        LOG_INFO(Kernel_Pthread, "name = {}", name);
     } else {
         new_thread->name = fmt::format("Thread{}", new_thread->tid.load());
     }

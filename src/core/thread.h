@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <vector>
+#include <unordered_map>
 
 #include "common/types.h"
 
@@ -17,7 +17,7 @@ using ThreadFunc = void (*)(void*);
 using PthreadFunc = void* (*)(void*);
 
 // For GDB
-inline std::vector<u64> thread_ids;
+inline std::unordered_map<u64, const char*> thread_list;
 
 class NativeThread {
 public:

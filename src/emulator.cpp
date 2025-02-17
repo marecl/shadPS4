@@ -23,7 +23,7 @@
 #include "common/scm_rev.h"
 #include "common/singleton.h"
 #include "common/version.h"
-#include "core/devtools/gdbstub.h"
+#include "core/devtools/gdb_stub.h"
 #include "core/file_format/psf.h"
 #include "core/file_format/splash.h"
 #include "core/file_format/trp.h"

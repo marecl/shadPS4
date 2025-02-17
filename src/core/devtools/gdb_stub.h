@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <functional>
-#include <optional>
 #include <thread>
 
 namespace Core::Devtools {
@@ -12,16 +10,16 @@ namespace Core::Devtools {
 class GdbStub {
 public:
     explicit GdbStub(u16 port);
+
     ~GdbStub();
 
 private:
     u16 m_port;
     int m_socket{};
     std::jthread m_thread;
-    std::string m_recv_buffer;
 
     // Taken from xenia
-    enum ControlCode : char {
+    enum class ControlCode : char {
         Ack = '+',
         Nack = '-',
         PacketStart = '$',
@@ -30,10 +28,10 @@ private:
     };
 
     // Taken from xenia
-    struct GDBCommand {
-        std::string cmd{};  // Command
-        std::string data{}; // Full packet
-        // u8 checksum{}; // Checksum
+    struct GdbCommand {
+        std::string cmd{};
+        std::string raw_data{};
+        u8 checksum{};
     };
 
     enum class Register : int {
@@ -63,38 +61,17 @@ private:
         GS,
     };
 
-    struct Breakpoint {
-        u64 address;
-        u8 original_byte;
-
-        explicit Breakpoint(const u64 address) : address(address) {
-            original_byte = *reinterpret_cast<u8*>(address);
-            Enable();
-        }
-
-        ~Breakpoint() {
-            Disable();
-        }
-
-        void Enable() const {
-            *reinterpret_cast<u8*>(address) = 0xCC;
-        }
-
-        void Disable() const {
-            *reinterpret_cast<u8*>(address) = original_byte;
-        }
-    };
-
-    std::vector<Breakpoint> m_breakpoints;
-
     void CreateSocket();
 
-    std::string ProcessIncomingData(int client);
-    std::string HandleCommand(const GDBCommand& command);
+    static bool IsValidAddress(u64 address, u64 length);
+    static bool ReadMemory(u64 address, u64 length, std::string* out);
+    static GdbCommand ParsePacket(const std::string& data);
+    static bool HandleIncomingData(int client);
+    static std::string HandleCommand(const GdbCommand& command);
 
     static std::string ReadRegisterAsString(Register reg);
 
-    void Run(const std::stop_token& stop_token);
+    void Run(const std::stop_token& stop) const;
 };
 
 } // namespace Core::Devtools
