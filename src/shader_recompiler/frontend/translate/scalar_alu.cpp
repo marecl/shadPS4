@@ -27,9 +27,11 @@ void Translator::EmitScalarAlu(const GcnInst& inst) {
         case Opcode::S_ADD_I32:
             return S_ADD_I32(inst);
         case Opcode::S_SUB_I32:
-            return S_SUB_U32(inst);
+            return S_SUB_I32(inst);
         case Opcode::S_ADDC_U32:
             return S_ADDC_U32(inst);
+        case Opcode::S_SUBB_U32:
+            return S_SUBB_U32(inst);
         case Opcode::S_MIN_I32:
             return S_MIN_U32(true, inst);
         case Opcode::S_MIN_U32:
@@ -72,10 +74,14 @@ void Translator::EmitScalarAlu(const GcnInst& inst) {
             return S_OR_B64(NegateMode::Result, true, inst);
         case Opcode::S_LSHL_B32:
             return S_LSHL_B32(inst);
+        case Opcode::S_LSHL_B64:
+            return S_LSHL_B64(inst);
         case Opcode::S_LSHR_B32:
             return S_LSHR_B32(inst);
         case Opcode::S_ASHR_I32:
             return S_ASHR_I32(inst);
+        case Opcode::S_ASHR_I64:
+            return S_ASHR_I64(inst);
         case Opcode::S_BFM_B32:
             return S_BFM_B32(inst);
         case Opcode::S_MUL_I32:
@@ -106,6 +112,8 @@ void Translator::EmitScalarAlu(const GcnInst& inst) {
             return S_FF1_I32_B32(inst);
         case Opcode::S_FF1_I32_B64:
             return S_FF1_I32_B64(inst);
+        case Opcode::S_FLBIT_I32_B32:
+            return S_FLBIT_I32_B32(inst);
         case Opcode::S_BITSET0_B32:
             return S_BITSET_B32(inst, 0);
         case Opcode::S_BITSET1_B32:
@@ -212,24 +220,63 @@ void Translator::EmitSOPK(const GcnInst& inst) {
 void Translator::S_ADD_U32(const GcnInst& inst) {
     const IR::U32 src0{GetSrc(inst.src[0])};
     const IR::U32 src1{GetSrc(inst.src[1])};
-    SetDst(inst.dst[0], ir.IAdd(src0, src1));
-    // TODO: Carry out
-    ir.SetScc(ir.Imm1(false));
+    const IR::U32 result{ir.IAdd(src0, src1)};
+    SetDst(inst.dst[0], result);
+
+    // SCC = tmp >= 0x100000000ULL ? 1'1U : 1'0U;
+    // The above assumes tmp is a 64-bit value.
+    // It should be enough however to test that the truncated result is less than at least one
+    // of the operands. In unsigned addition the result is always bigger than both the operands,
+    // except in the case of overflow where the truncated result is less than both.
+    ir.SetScc(ir.ILessThan(result, src0, false));
 }
 
 void Translator::S_SUB_U32(const GcnInst& inst) {
     const IR::U32 src0{GetSrc(inst.src[0])};
     const IR::U32 src1{GetSrc(inst.src[1])};
     SetDst(inst.dst[0], ir.ISub(src0, src1));
-    // TODO: Carry out
-    ir.SetScc(ir.Imm1(false));
+
+    // SCC = S1.u > S0.u ? 1'1U : 1'0U;
+    ir.SetScc(ir.IGreaterThan(src1, src0, false));
+}
+
+void Translator::S_SUBB_U32(const GcnInst& inst) {
+    const IR::U32 src0{GetSrc(inst.src[0])};
+    const IR::U32 src1{GetSrc(inst.src[1])};
+    const IR::U32 borrow{ir.Select(ir.GetScc(), ir.Imm32(1U), ir.Imm32(0U))};
+    const IR::U32 result{ir.ISub(ir.ISub(src0, src1), borrow)};
+    SetDst(inst.dst[0], result);
+
+    const IR::U32 sum_with_borrow{ir.IAdd(src1, borrow)};
+    ir.SetScc(ir.ILessThan(src0, sum_with_borrow, false));
 }
 
 void Translator::S_ADD_I32(const GcnInst& inst) {
     const IR::U32 src0{GetSrc(inst.src[0])};
     const IR::U32 src1{GetSrc(inst.src[1])};
-    SetDst(inst.dst[0], ir.IAdd(src0, src1));
-    // TODO: Overflow flag
+    const IR::U32 result{ir.IAdd(src0, src1)};
+    SetDst(inst.dst[0], result);
+
+    // SCC = ((S0.u[31] == S1.u[31]) && (S0.u[31] != Result.u[31]));
+    const IR::U32 shift{ir.Imm32(31)};
+    const IR::U32 sign0{ir.ShiftRightLogical(src0, shift)};
+    const IR::U32 sign1{ir.ShiftRightLogical(src1, shift)};
+    const IR::U32 signr{ir.ShiftRightLogical(result, shift)};
+    ir.SetScc(ir.LogicalAnd(ir.IEqual(sign0, sign1), ir.INotEqual(sign0, signr)));
+}
+
+void Translator::S_SUB_I32(const GcnInst& inst) {
+    const IR::U32 src0{GetSrc(inst.src[0])};
+    const IR::U32 src1{GetSrc(inst.src[1])};
+    const IR::U32 result{ir.ISub(src0, src1)};
+    SetDst(inst.dst[0], result);
+
+    // SCC = ((S0.u[31] != S1.u[31]) && (S0.u[31] != tmp.u[31]));
+    const IR::U32 shift{ir.Imm32(31)};
+    const IR::U32 sign0{ir.ShiftRightLogical(src0, shift)};
+    const IR::U32 sign1{ir.ShiftRightLogical(src1, shift)};
+    const IR::U32 signr{ir.ShiftRightLogical(result, shift)};
+    ir.SetScc(ir.LogicalAnd(ir.INotEqual(sign0, sign1), ir.INotEqual(sign0, signr)));
 }
 
 void Translator::S_ADDC_U32(const GcnInst& inst) {
@@ -420,10 +467,19 @@ void Translator::S_LSHL_B32(const GcnInst& inst) {
     ir.SetScc(ir.INotEqual(result, ir.Imm32(0)));
 }
 
+void Translator::S_LSHL_B64(const GcnInst& inst) {
+    const IR::U64 src0{GetSrc64(inst.src[0])};
+    const IR::U64 src1{GetSrc64(inst.src[1])};
+    const IR::U64 result = ir.ShiftLeftLogical(src0, ir.BitwiseAnd(src1, ir.Imm64(u64(0x3F))));
+    SetDst64(inst.dst[0], result);
+    ir.SetScc(ir.INotEqual(result, ir.Imm64(u64(0))));
+}
+
 void Translator::S_LSHR_B32(const GcnInst& inst) {
     const IR::U32 src0{GetSrc(inst.src[0])};
     const IR::U32 src1{GetSrc(inst.src[1])};
-    const IR::U32 result{ir.ShiftRightLogical(src0, src1)};
+    const IR::U32 shift_amt = ir.BitwiseAnd(src1, ir.Imm32(0x1F));
+    const IR::U32 result = ir.ShiftRightLogical(src0, shift_amt);
     SetDst(inst.dst[0], result);
     ir.SetScc(ir.INotEqual(result, ir.Imm32(0)));
 }
@@ -431,9 +487,17 @@ void Translator::S_LSHR_B32(const GcnInst& inst) {
 void Translator::S_ASHR_I32(const GcnInst& inst) {
     const IR::U32 src0{GetSrc(inst.src[0])};
     const IR::U32 src1{GetSrc(inst.src[1])};
-    const IR::U32 result{ir.ShiftRightArithmetic(src0, src1)};
+    const IR::U32 result{ir.ShiftRightArithmetic(src0, ir.BitwiseAnd(src1, ir.Imm32(0x1F)))};
     SetDst(inst.dst[0], result);
     ir.SetScc(ir.INotEqual(result, ir.Imm32(0)));
+}
+
+void Translator::S_ASHR_I64(const GcnInst& inst) {
+    const IR::U64 src0{GetSrc64(inst.src[0])};
+    const IR::U64 src1{GetSrc64(inst.src[1])};
+    const IR::U64 result{ir.ShiftRightArithmetic(src0, ir.BitwiseAnd(src1, ir.Imm64(u64(0x3F))))};
+    SetDst64(inst.dst[0], result);
+    ir.SetScc(ir.INotEqual(result, ir.Imm64(u64(0))));
 }
 
 void Translator::S_BFM_B32(const GcnInst& inst) {
@@ -609,6 +673,17 @@ void Translator::S_FF1_I32_B64(const GcnInst& inst) {
     const IR::U64 src0{GetSrc64(inst.src[0])};
     const IR::U32 result{ir.FindILsb(src0)};
     SetDst(inst.dst[0], result);
+}
+
+void Translator::S_FLBIT_I32_B32(const GcnInst& inst) {
+    const IR::U32 src0{GetSrc(inst.src[0])};
+    // Gcn wants the MSB position counting from the left, but SPIR-V counts from the rightmost (LSB)
+    // position
+    const IR::U32 msb_pos = ir.FindUMsb(src0);
+    const IR::U32 pos_from_left = ir.ISub(ir.Imm32(31), msb_pos);
+    // Select 0xFFFFFFFF if src0 was 0
+    const IR::U1 cond = ir.INotEqual(src0, ir.Imm32(0));
+    SetDst(inst.dst[0], IR::U32{ir.Select(cond, pos_from_left, ir.Imm32(~0U))});
 }
 
 void Translator::S_BITSET_B32(const GcnInst& inst, u32 bit_value) {

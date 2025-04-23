@@ -106,15 +106,29 @@ public:
     [[nodiscard]] U32 SharedAtomicOr(const U32& address, const U32& data);
     [[nodiscard]] U32 SharedAtomicXor(const U32& address, const U32& data);
 
+    [[nodiscard]] U32 SharedAtomicIIncrement(const U32& address);
+    [[nodiscard]] U32 SharedAtomicIDecrement(const U32& address);
+    [[nodiscard]] U32 SharedAtomicISub(const U32& address, const U32& data);
+
     [[nodiscard]] U32 ReadConst(const Value& base, const U32& offset);
     [[nodiscard]] U32 ReadConstBuffer(const Value& handle, const U32& index);
 
-    [[nodiscard]] Value LoadBuffer(int num_dwords, const Value& handle, const Value& address,
-                                   BufferInstInfo info);
+    [[nodiscard]] U32 LoadBufferU8(const Value& handle, const Value& address, BufferInstInfo info);
+    [[nodiscard]] U32 LoadBufferU16(const Value& handle, const Value& address, BufferInstInfo info);
+    [[nodiscard]] Value LoadBufferU32(int num_dwords, const Value& handle, const Value& address,
+                                      BufferInstInfo info);
+    [[nodiscard]] Value LoadBufferF32(int num_dwords, const Value& handle, const Value& address,
+                                      BufferInstInfo info);
     [[nodiscard]] Value LoadBufferFormat(const Value& handle, const Value& address,
                                          BufferInstInfo info);
-    void StoreBuffer(int num_dwords, const Value& handle, const Value& address, const Value& data,
-                     BufferInstInfo info);
+    void StoreBufferU8(const Value& handle, const Value& address, const U32& data,
+                       BufferInstInfo info);
+    void StoreBufferU16(const Value& handle, const Value& address, const U32& data,
+                        BufferInstInfo info);
+    void StoreBufferU32(int num_dwords, const Value& handle, const Value& address,
+                        const Value& data, BufferInstInfo info);
+    void StoreBufferF32(int num_dwords, const Value& handle, const Value& address,
+                        const Value& data, BufferInstInfo info);
     void StoreBufferFormat(const Value& handle, const Value& address, const Value& data,
                            BufferInstInfo info);
 
@@ -167,14 +181,19 @@ public:
 
     [[nodiscard]] U64 PackUint2x32(const Value& vector);
     [[nodiscard]] Value UnpackUint2x32(const U64& value);
-
     [[nodiscard]] F64 PackFloat2x32(const Value& vector);
 
-    [[nodiscard]] U32 PackFloat2x16(const Value& vector);
-    [[nodiscard]] Value UnpackFloat2x16(const U32& value);
+    [[nodiscard]] U32 Pack2x16(AmdGpu::NumberFormat number_format, const Value& vector);
+    [[nodiscard]] Value Unpack2x16(AmdGpu::NumberFormat number_format, const U32& value);
 
-    [[nodiscard]] U32 PackHalf2x16(const Value& vector);
-    [[nodiscard]] Value UnpackHalf2x16(const U32& value);
+    [[nodiscard]] U32 Pack4x8(AmdGpu::NumberFormat number_format, const Value& vector);
+    [[nodiscard]] Value Unpack4x8(AmdGpu::NumberFormat number_format, const U32& value);
+
+    [[nodiscard]] U32 Pack10_11_11(AmdGpu::NumberFormat number_format, const Value& vector);
+    [[nodiscard]] Value Unpack10_11_11(AmdGpu::NumberFormat number_format, const U32& value);
+
+    [[nodiscard]] U32 Pack2_10_10_10(AmdGpu::NumberFormat number_format, const Value& vector);
+    [[nodiscard]] Value Unpack2_10_10_10(AmdGpu::NumberFormat number_format, const U32& value);
 
     [[nodiscard]] F32F64 FPAdd(const F32F64& a, const F32F64& b);
     [[nodiscard]] F32F64 FPSub(const F32F64& a, const F32F64& b);
@@ -218,11 +237,14 @@ public:
     [[nodiscard]] U1 FPUnordered(const F32F64& lhs, const F32F64& rhs);
     [[nodiscard]] F32F64 FPMax(const F32F64& lhs, const F32F64& rhs, bool is_legacy = false);
     [[nodiscard]] F32F64 FPMin(const F32F64& lhs, const F32F64& rhs, bool is_legacy = false);
+    [[nodiscard]] F32F64 FPMinTri(const F32F64& a, const F32F64& b, const F32F64& c);
+    [[nodiscard]] F32F64 FPMaxTri(const F32F64& a, const F32F64& b, const F32F64& c);
+    [[nodiscard]] F32F64 FPMedTri(const F32F64& a, const F32F64& b, const F32F64& c);
 
     [[nodiscard]] U32U64 IAdd(const U32U64& a, const U32U64& b);
     [[nodiscard]] Value IAddCary(const U32& a, const U32& b);
     [[nodiscard]] U32U64 ISub(const U32U64& a, const U32U64& b);
-    [[nodiscard]] Value IMulExt(const U32& a, const U32& b, bool is_signed = false);
+    [[nodiscard]] U32 IMulHi(const U32& a, const U32& b, bool is_signed = false);
     [[nodiscard]] U32U64 IMul(const U32U64& a, const U32U64& b);
     [[nodiscard]] U32 IDiv(const U32& a, const U32& b, bool is_signed = false);
     [[nodiscard]] U32 IMod(const U32& a, const U32& b, bool is_signed = false);
@@ -251,6 +273,15 @@ public:
     [[nodiscard]] U32 SMax(const U32& a, const U32& b);
     [[nodiscard]] U32 UMax(const U32& a, const U32& b);
     [[nodiscard]] U32 IMax(const U32& a, const U32& b, bool is_signed);
+    [[nodiscard]] U32 SMinTri(const U32& a, const U32& b, const U32& c);
+    [[nodiscard]] U32 UMinTri(const U32& a, const U32& b, const U32& c);
+    [[nodiscard]] U32 IMinTri(const U32& a, const U32& b, const U32& c, bool is_signed);
+    [[nodiscard]] U32 SMaxTri(const U32& a, const U32& b, const U32& c);
+    [[nodiscard]] U32 UMaxTri(const U32& a, const U32& b, const U32& c);
+    [[nodiscard]] U32 IMaxTri(const U32& a, const U32& b, const U32& c, bool is_signed);
+    [[nodiscard]] U32 SMedTri(const U32& a, const U32& b, const U32& c);
+    [[nodiscard]] U32 UMedTri(const U32& a, const U32& b, const U32& c);
+    [[nodiscard]] U32 IMedTri(const U32& a, const U32& b, const U32& c, bool is_signed);
     [[nodiscard]] U32 SClamp(const U32& value, const U32& min, const U32& max);
     [[nodiscard]] U32 UClamp(const U32& value, const U32& min, const U32& max);
 
@@ -258,7 +289,7 @@ public:
     [[nodiscard]] U1 IEqual(const U32U64& lhs, const U32U64& rhs);
     [[nodiscard]] U1 ILessThanEqual(const U32& lhs, const U32& rhs, bool is_signed);
     [[nodiscard]] U1 IGreaterThan(const U32& lhs, const U32& rhs, bool is_signed);
-    [[nodiscard]] U1 INotEqual(const U32& lhs, const U32& rhs);
+    [[nodiscard]] U1 INotEqual(const U32U64& lhs, const U32U64& rhs);
     [[nodiscard]] U1 IGreaterThanEqual(const U32& lhs, const U32& rhs, bool is_signed);
 
     [[nodiscard]] U1 LogicalOr(const U1& a, const U1& b);

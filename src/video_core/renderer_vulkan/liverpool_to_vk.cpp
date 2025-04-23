@@ -121,7 +121,7 @@ vk::PrimitiveTopology PrimitiveType(AmdGpu::PrimitiveType type) {
     case AmdGpu::PrimitiveType::RectList:
         return vk::PrimitiveTopology::ePatchList;
     default:
-        UNREACHABLE();
+        UNREACHABLE_MSG("Unimplemented primitive type: {}", static_cast<u32>(type));
         return vk::PrimitiveTopology::eTriangleList;
     }
 }
@@ -153,6 +153,18 @@ vk::CullModeFlags CullMode(Liverpool::CullMode mode) {
     default:
         UNREACHABLE();
         return vk::CullModeFlagBits::eNone;
+    }
+}
+
+vk::FrontFace FrontFace(Liverpool::FrontFace face) {
+    switch (face) {
+    case Liverpool::FrontFace::Clockwise:
+        return vk::FrontFace::eClockwise;
+    case Liverpool::FrontFace::CounterClockwise:
+        return vk::FrontFace::eCounterClockwise;
+    default:
+        UNREACHABLE();
+        return vk::FrontFace::eClockwise;
     }
 }
 
@@ -352,12 +364,9 @@ vk::ComponentMapping ComponentMapping(AmdGpu::CompMapping comp_mapping) {
     };
 }
 
-static constexpr vk::FormatFeatureFlags2 BufferRead =
-    vk::FormatFeatureFlagBits2::eUniformTexelBuffer | vk::FormatFeatureFlagBits2::eVertexBuffer;
-static constexpr vk::FormatFeatureFlags2 BufferWrite =
-    vk::FormatFeatureFlagBits2::eStorageTexelBuffer |
-    vk::FormatFeatureFlagBits2::eStorageReadWithoutFormat |
-    vk::FormatFeatureFlagBits2::eStorageWriteWithoutFormat;
+// Texel buffer feature flags are not needed as format is interpreted in-shader.
+static constexpr vk::FormatFeatureFlags2 BufferRead = vk::FormatFeatureFlagBits2::eVertexBuffer;
+static constexpr vk::FormatFeatureFlags2 BufferWrite = static_cast<vk::FormatFeatureFlags2>(0);
 static constexpr vk::FormatFeatureFlags2 ImageRead = vk::FormatFeatureFlagBits2::eTransferSrc |
                                                      vk::FormatFeatureFlagBits2::eTransferDst |
                                                      vk::FormatFeatureFlagBits2::eSampledImage;
@@ -618,7 +627,7 @@ std::span<const SurfaceFormatInfo> SurfaceFormats() {
                                 vk::Format::eR5G5B5A1UnormPack16),
         // 4_4_4_4
         CreateSurfaceFormatInfo(AmdGpu::DataFormat::Format4_4_4_4, AmdGpu::NumberFormat::Unorm,
-                                vk::Format::eA4B4G4R4UnormPack16),
+                                vk::Format::eB4G4R4A4UnormPack16),
         // 8_24
         // 24_8
         // X24_8_32

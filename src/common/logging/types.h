@@ -47,6 +47,7 @@ enum class Class : u8 {
     Lib,                   ///< HLE implementation of system library. Each major library
                            ///< should have its own subclass.
     Lib_LibC,              ///< The LibC implementation.
+    Lib_LibcInternal,      ///< The LibcInternal implementation.
     Lib_Kernel,            ///< The LibKernel implementation.
     Lib_Pad,               ///< The LibScePad implementation.
     Lib_GnmDriver,         ///< The LibSceGnmDriver implementation.
@@ -68,6 +69,7 @@ enum class Class : u8 {
     Lib_Http2,             ///< The LibSceHttp2 implementation.
     Lib_SysModule,         ///< The LibSceSysModule implementation
     Lib_NpCommon,          ///< The LibSceNpCommon implementation
+    Lib_NpAuth,            ///< The LibSceNpAuth implementation
     Lib_NpManager,         ///< The LibSceNpManager implementation
     Lib_NpScore,           ///< The LibSceNpScore implementation
     Lib_NpTrophy,          ///< The LibSceNpTrophy implementation
@@ -98,6 +100,10 @@ enum class Class : u8 {
     Lib_Videodec,          ///< The LibSceVideodec implementation.
     Lib_RazorCpu,          ///< The LibRazorCpu implementation.
     Lib_Mouse,             ///< The LibSceMouse implementation
+    Lib_WebBrowserDialog,  ///< The LibSceWebBrowserDialog implementation
+    Lib_NpParty,           ///< The LibSceNpParty implementation
+    Lib_Zlib,              ///< The LibSceZlib implementation.
+    Lib_Hmd,               ///< The LibSceHmd implementation.
     Frontend,              ///< Emulator UI
     Render,                ///< Video Core
     Render_Vulkan,         ///< Vulkan backend

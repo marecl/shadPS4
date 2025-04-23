@@ -25,7 +25,6 @@
 #include "common/version.h"
 #include "core/devtools/gdb_stub.h"
 #include "core/file_format/psf.h"
-#include "core/file_format/splash.h"
 #include "core/file_format/trp.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/disc_map/disc_map.h"
@@ -34,6 +33,7 @@
 #include "core/libraries/ngs2/ngs2.h"
 #include "core/libraries/np_trophy/np_trophy.h"
 #include "core/libraries/rtc/rtc.h"
+#include "core/libraries/save_data/save_backup.h"
 #include "core/linker.h"
 #include "core/memory.h"
 #include "emulator.h"
@@ -49,28 +49,6 @@ Emulator::Emulator() {
     Common::NtApi::Initialize();
     SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
 #endif
-
-    // Start logger.
-    Common::Log::Initialize();
-    Common::Log::Start();
-    LOG_INFO(Loader, "Starting shadps4 emulator v{} ", Common::VERSION);
-    LOG_INFO(Loader, "Revision {}", Common::g_scm_rev);
-    LOG_INFO(Loader, "Branch {}", Common::g_scm_branch);
-    LOG_INFO(Loader, "Description {}", Common::g_scm_desc);
-
-    LOG_INFO(Config, "General LogType: {}", Config::getLogType());
-    LOG_INFO(Config, "General isNeo: {}", Config::isNeoModeConsole());
-    LOG_INFO(Config, "GPU isNullGpu: {}", Config::nullGpu());
-    LOG_INFO(Config, "GPU shouldDumpShaders: {}", Config::dumpShaders());
-    LOG_INFO(Config, "GPU vblankDivider: {}", Config::vblankDiv());
-    LOG_INFO(Config, "Vulkan gpuId: {}", Config::getGpuId());
-    LOG_INFO(Config, "Vulkan vkValidation: {}", Config::vkValidationEnabled());
-    LOG_INFO(Config, "Vulkan vkValidationSync: {}", Config::vkValidationSyncEnabled());
-    LOG_INFO(Config, "Vulkan vkValidationGpu: {}", Config::vkValidationGpuEnabled());
-    LOG_INFO(Config, "Vulkan crashDiagnostics: {}", Config::vkCrashDiagnosticEnabled());
-    LOG_INFO(Config, "Vulkan hostMarkers: {}", Config::vkHostMarkersEnabled());
-    LOG_INFO(Config, "Vulkan guestMarkers: {}", Config::vkGuestMarkersEnabled());
-    LOG_INFO(Config, "Vulkan rdocEnable: {}", Config::isRdocEnabled());
 
     // Create stdin/stdout/stderr
     Common::Singleton<FileSys::HandleTable>::Instance()->CreateStdHandles();
@@ -89,9 +67,8 @@ Emulator::Emulator() {
     const auto user_dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir);
     QString filePath = QString::fromStdString((user_dir / "play_time.txt").string());
     QFile file(filePath);
-    if (!file.open(QIODevice::ReadWrite | QIODevice::Text)) {
-        LOG_INFO(Loader, "Error opening or creating play_time.txt");
-    }
+    ASSERT_MSG(file.open(QIODevice::ReadWrite | QIODevice::Text),
+               "Error opening or creating play_time.txt");
 #endif
 }
 
@@ -101,9 +78,21 @@ Emulator::~Emulator() {
 }
 
 void Emulator::Run(const std::filesystem::path& file, const std::vector<std::string> args) {
+    const auto eboot_name = file.filename().string();
+    auto game_folder = file.parent_path();
+    if (const auto game_folder_name = game_folder.filename().string();
+        game_folder_name.ends_with("-UPDATE") || game_folder_name.ends_with("-patch")) {
+        // If an executable was launched from a separate update directory,
+        // use the base game directory as the game folder.
+        const auto base_name = game_folder_name.substr(0, game_folder_name.size() - 7);
+        const auto base_path = game_folder.parent_path() / base_name;
+        if (std::filesystem::is_directory(base_path)) {
+            game_folder = base_path;
+        }
+    }
+
     // Applications expect to be run from /app0 so mount the file's parent path as app0.
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
-    const auto game_folder = file.parent_path();
     mnt->Mount(game_folder, "/app0");
     // Certain games may use /hostapp as well such as CUSA001100
     mnt->Mount(game_folder, "/hostapp");
@@ -118,6 +107,11 @@ void Emulator::Run(const std::filesystem::path& file, const std::vector<std::str
     Common::PSFAttributes psf_attributes{};
 
     const auto param_sfo_path = mnt->GetHostPath("/app0/sce_sys/param.sfo");
+    if (!std::filesystem::exists(param_sfo_path) || !Config::getSeparateLogFilesEnabled()) {
+        Common::Log::Initialize();
+        Common::Log::Start();
+    }
+
     if (std::filesystem::exists(param_sfo_path)) {
         auto* param_sfo = Common::Singleton<PSF>::Instance();
         const bool success = param_sfo->Open(param_sfo_path);
@@ -125,6 +119,31 @@ void Emulator::Run(const std::filesystem::path& file, const std::vector<std::str
         const auto content_id = param_sfo->GetString("CONTENT_ID");
         ASSERT_MSG(content_id.has_value(), "Failed to get CONTENT_ID");
         id = std::string(*content_id, 7, 9);
+
+        if (Config::getSeparateLogFilesEnabled()) {
+            Common::Log::Initialize(id + ".log");
+            Common::Log::Start();
+        }
+        LOG_INFO(Loader, "Starting shadps4 emulator v{} ", Common::g_version);
+        LOG_INFO(Loader, "Revision {}", Common::g_scm_rev);
+        LOG_INFO(Loader, "Branch {}", Common::g_scm_branch);
+        LOG_INFO(Loader, "Description {}", Common::g_scm_desc);
+        LOG_INFO(Loader, "Remote {}", Common::g_scm_remote_url);
+
+        LOG_INFO(Config, "General LogType: {}", Config::getLogType());
+        LOG_INFO(Config, "General isNeo: {}", Config::isNeoModeConsole());
+        LOG_INFO(Config, "GPU isNullGpu: {}", Config::nullGpu());
+        LOG_INFO(Config, "GPU shouldDumpShaders: {}", Config::dumpShaders());
+        LOG_INFO(Config, "GPU vblankDivider: {}", Config::vblankDiv());
+        LOG_INFO(Config, "Vulkan gpuId: {}", Config::getGpuId());
+        LOG_INFO(Config, "Vulkan vkValidation: {}", Config::vkValidationEnabled());
+        LOG_INFO(Config, "Vulkan vkValidationSync: {}", Config::vkValidationSyncEnabled());
+        LOG_INFO(Config, "Vulkan vkValidationGpu: {}", Config::vkValidationGpuEnabled());
+        LOG_INFO(Config, "Vulkan crashDiagnostics: {}", Config::getVkCrashDiagnosticEnabled());
+        LOG_INFO(Config, "Vulkan hostMarkers: {}", Config::getVkHostMarkersEnabled());
+        LOG_INFO(Config, "Vulkan guestMarkers: {}", Config::getVkGuestMarkersEnabled());
+        LOG_INFO(Config, "Vulkan rdocEnable: {}", Config::isRdocEnabled());
+
         Libraries::NpTrophy::game_serial = id;
         const auto trophyDir =
             Common::FS::GetUserPath(Common::FS::PathType::MetaDataDir) / id / "TrophyFiles";
@@ -166,12 +185,7 @@ void Emulator::Run(const std::filesystem::path& file, const std::vector<std::str
 
     const auto pic1_path = mnt->GetHostPath("/app0/sce_sys/pic1.png");
     if (std::filesystem::exists(pic1_path)) {
-        auto* splash = Common::Singleton<Splash>::Instance();
-        if (!splash->IsLoaded()) {
-            if (!splash->Open(pic1_path)) {
-                LOG_ERROR(Loader, "Game splash: unable to open file");
-            }
-        }
+        game_info.splash_path = pic1_path;
     }
 
     game_info.initialized = true;
@@ -184,11 +198,23 @@ void Emulator::Run(const std::filesystem::path& file, const std::vector<std::str
 
     std::string game_title = fmt::format("{} - {} <{}>", id, title, app_version);
     std::string window_title = "";
-    if (Common::isRelease) {
-        window_title = fmt::format("shadPS4 v{} | {}", Common::VERSION, game_title);
+    if (Common::g_is_release) {
+        window_title = fmt::format("shadPS4 v{} | {}", Common::g_version, game_title);
     } else {
-        window_title = fmt::format("shadPS4 v{} {} {} | {}", Common::VERSION, Common::g_scm_branch,
-                                   Common::g_scm_desc, game_title);
+        std::string remote_url(Common::g_scm_remote_url);
+        std::string remote_host;
+        try {
+            remote_host = remote_url.substr(19, remote_url.rfind('/') - 19);
+        } catch (...) {
+            remote_host = "unknown";
+        }
+        if (remote_host == "shadps4-emu" || remote_url.length() == 0) {
+            window_title = fmt::format("shadPS4 v{} {} {} | {}", Common::g_version,
+                                       Common::g_scm_branch, Common::g_scm_desc, game_title);
+        } else {
+            window_title = fmt::format("shadPS4 v{} {}/{} {} | {}", Common::g_version, remote_host,
+                                       Common::g_scm_branch, Common::g_scm_desc, game_title);
+        }
     }
     window = std::make_unique<Frontend::WindowSDL>(
         Config::getScreenWidth(), Config::getScreenHeight(), controller, window_title);
@@ -224,7 +250,7 @@ void Emulator::Run(const std::filesystem::path& file, const std::vector<std::str
     Libraries::InitHLELibs(&linker->GetHLESymbols());
 
     // Load the module with the linker
-    const auto eboot_path = mnt->GetHostPath("/app0/" + file.filename().string());
+    const auto eboot_path = mnt->GetHostPath("/app0/" + eboot_name);
     linker->LoadModule(eboot_path);
 
     // check if we have system modules to load
@@ -262,17 +288,16 @@ void Emulator::Run(const std::filesystem::path& file, const std::vector<std::str
     UpdatePlayTime(id);
 #endif
 
-    std::exit(0);
+    std::quick_exit(0);
 }
 
 void Emulator::LoadSystemModules(const std::string& game_serial) {
-    constexpr std::array<SysModules, 11> ModulesToLoad{
+    constexpr std::array<SysModules, 10> ModulesToLoad{
         {{"libSceNgs2.sprx", &Libraries::Ngs2::RegisterlibSceNgs2},
          {"libSceUlt.sprx", nullptr},
          {"libSceJson.sprx", nullptr},
          {"libSceJson2.sprx", nullptr},
          {"libSceLibcInternal.sprx", &Libraries::LibcInternal::RegisterlibSceLibcInternal},
-         {"libSceDiscMap.sprx", &Libraries::DiscMap::RegisterlibSceDiscMap},
          {"libSceRtc.sprx", &Libraries::Rtc::RegisterlibSceRtc},
          {"libSceCesCs.sprx", nullptr},
          {"libSceFont.sprx", nullptr},

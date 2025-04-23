@@ -80,6 +80,7 @@ bool ParseFilterRule(Filter& instance, Iterator begin, Iterator end) {
     SUB(Kernel, Sce)                                                                               \
     CLS(Lib)                                                                                       \
     SUB(Lib, LibC)                                                                                 \
+    SUB(Lib, LibcInternal)                                                                         \
     SUB(Lib, Kernel)                                                                               \
     SUB(Lib, Pad)                                                                                  \
     SUB(Lib, GnmDriver)                                                                            \
@@ -100,6 +101,7 @@ bool ParseFilterRule(Filter& instance, Iterator begin, Iterator end) {
     SUB(Lib, Ssl2)                                                                                 \
     SUB(Lib, SysModule)                                                                            \
     SUB(Lib, Move)                                                                                 \
+    SUB(Lib, NpAuth)                                                                               \
     SUB(Lib, NpCommon)                                                                             \
     SUB(Lib, NpManager)                                                                            \
     SUB(Lib, NpScore)                                                                              \
@@ -131,6 +133,10 @@ bool ParseFilterRule(Filter& instance, Iterator begin, Iterator end) {
     SUB(Lib, Videodec)                                                                             \
     SUB(Lib, RazorCpu)                                                                             \
     SUB(Lib, Mouse)                                                                                \
+    SUB(Lib, WebBrowserDialog)                                                                     \
+    SUB(Lib, NpParty)                                                                              \
+    SUB(Lib, Zlib)                                                                                 \
+    SUB(Lib, Hmd)                                                                                  \
     CLS(Frontend)                                                                                  \
     CLS(Render)                                                                                    \
     SUB(Render, Vulkan)                                                                            \
