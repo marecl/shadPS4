@@ -157,7 +157,8 @@ void L::DrawAdvanced() {
 
     if (isSystemPaused) {
         GetForegroundDrawList(GetMainViewport())
-            ->AddText({10.0f, io.DisplaySize.y - 40.0f}, IM_COL32_WHITE, "Game Paused Press F9 to Resume");
+            ->AddText({10.0f, io.DisplaySize.y - 40.0f}, IM_COL32_WHITE,
+                      "Game Paused Press F9 to Resume");
     }
 
     if (DebugState.should_show_frame_dump && DebugState.waiting_reg_dumps.empty()) {
@@ -387,7 +388,7 @@ void L::Draw() {
         if (Begin("Video Info", nullptr,
                   ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDecoration |
                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking)) {
-                        
+
             // Set window position to top left if it was toggled on
             SetWindowPos("Video Info", {999999.0f, 0.0f}, ImGuiCond_Always);
 

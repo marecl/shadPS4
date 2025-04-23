@@ -161,10 +161,10 @@ std::string BuildThreadList() {
     buffer += "l<?xml version=\"1.0\"?>\n";
     buffer += "<threads>\n";
 
-    for (auto& [pthread_id, thread_name] : thread_list) {
-        LOG_INFO(Debug, "pid_t pthread_id = {}", static_cast<pid_t>(pthread_id));
-        buffer += fmt::format(R"*(    <thread id="{:x}" name="{}"></thread>)*",
-                              static_cast<pid_t>(pthread_id), thread_name);
+    for (auto& [pthread_id, thread_name] : thread_list_name) {
+        u32 tid_enc = thread_list_pid_forTool[pthread_id];
+        buffer +=
+            fmt::format(R"*(    <thread id="{:x}" name="{}"></thread>)*", tid_enc, thread_name);
         buffer += '\n';
     }
 
@@ -173,7 +173,7 @@ std::string BuildThreadList() {
 }
 
 std::string GdbStub::HandleCommand(const GdbCommand& command) {
-    LOG_INFO(Debug, "command.cmd = {}", command.cmd);
+    LOG_INFO(Debug, "command.cmd = {} | command.arg = {}", command.cmd, command.raw_data);
 
     static const std::unordered_map<std::string, std::function<std::string()>> command_table{
         {"!", [&] { return OK; }},
@@ -203,40 +203,47 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
          }},
         {"Hc",
          [&] {
-             const auto tid = std::stoi(command.raw_data.substr(4, 1), nullptr, 16);
-             LOG_INFO(Debug, "tid (Hc) = {}", tid);
+             const auto tid_enc = std::stoull(
+                 command.raw_data.substr(3, command.raw_data.find('#') - 3), nullptr, 16);
+             const u64 tid = thread_list_pid_fromTool[tid_enc];
+             LOG_INFO(Debug, "tid (Hc) = {:#8x} decoded to {:#16x}", tid_enc, tid);
 
              return OK;
          }},
         {"Hg",
+         // Select this particular thread
          [&] {
-             const auto tid =
-                 std::stoi(command.raw_data.substr(3, command.raw_data.find('#') - 3), nullptr, 16);
-             LOG_INFO(Debug, "tid (Hg) = {}", tid);
+             const auto encoded_tid = std::stoul(
+                 command.raw_data.substr(3, command.raw_data.find('#') - 3), nullptr, 16);
+             const u64 tid = thread_list_pid_fromTool[encoded_tid];
+             LOG_INFO(Debug, "tid (Hg) = {:#8x} decoded to {:#16x}", encoded_tid, tid);
+
+             const pid_t thread_id = static_cast<pid_t>(tid);
 
 #if defined(__linux__)
              user_regs_struct regs{};
 
-             if (ptrace(PTRACE_SEIZE, tid, nullptr, nullptr) == -1) {
+             if (ptrace(PTRACE_SEIZE, thread_id, nullptr, nullptr) == -1) {
                  LOG_ERROR(Debug, "Failed to seize thread {}, {}", tid, strerror(errno));
                  return E01;
              }
 
-             ptrace(PTRACE_INTERRUPT, tid, nullptr, nullptr); // Stop the thread manually
+             ptrace(PTRACE_INTERRUPT, thread_id, nullptr, nullptr); // Stop the thread manually
              waitpid(tid, nullptr, 0);
 
-             if (ptrace(PTRACE_GETREGS, tid, nullptr, &regs) == -1) {
-                 LOG_ERROR(Debug, "Failed to get registers for thread {}, {}", tid,
+             if (ptrace(PTRACE_GETREGS, thread_id, nullptr, &regs) == -1) {
+                 LOG_ERROR(Debug, "Failed to get registers for thread {}, {}", thread_id,
                            strerror(errno));
-                 ptrace(PTRACE_DETACH, tid, nullptr, nullptr);
+                 ptrace(PTRACE_DETACH, thread_id, nullptr, nullptr);
                  return E01;
              }
 
-             ptrace(PTRACE_DETACH, tid, nullptr, nullptr);
+             ptrace(PTRACE_DETACH, thread_id, nullptr, nullptr);
 
              LOG_INFO(Debug, "RAX: {:016x}", regs.rax);
              LOG_INFO(Debug, "RIP: {:016x}", regs.rip);
-#else if defined(_WIN32)
+
+#elif defined(_WIN32)
 #endif
 
              return OK;
@@ -262,15 +269,27 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
          }},
         {"p",
          [&] {
-             const auto reg =
-                 static_cast<Register>(std::stoi(command.raw_data.substr(2), nullptr, 16));
+             auto targetReg =
+                 std::stoi(command.raw_data.substr(2, command.raw_data.find('#') - 2), nullptr, 16);
+
+             LOG_INFO(Debug, "Reading reg no {}", targetReg);
+             const auto reg = static_cast<Register>(targetReg);
+
              return ReadRegisterAsString(reg);
          }},
         {"qAttached", [&] { return "1"; }},
         {"qC", [&] { return fmt::format("QC {:x}", gettid()); }},
         {"qSupported",
          [&] { return "PacketSize=1024;qXfer:features:read+;qXfer:threads:read+;binary-upload+"; }},
-        {"qTStatus", [&] { return "Trunning;tnotrun:0"; }},
+        {"qTStatus", [&] { return "T1;tnotrun:0"; }},
+        // List of
+        // ‘QTDV:n:value:builtin:name’
+        // Ending with empty string
+        {"qTfV", [&] -> std::string { return ""; }},
+        {"qTsV", [&] -> std::string { return ""; }},
+        {"qTfP", [&] -> std::string { return ""; }},
+        {"qTsP", [&] -> std::string { return ""; }},
+
         {"qXfer",
          [&] -> std::string {
              auto param = command.raw_data;
@@ -297,9 +316,10 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
          [&] {
              std::string buffer = "m";
 
-             for (const auto& [thread_id, _] : thread_list) {
-                 LOG_INFO(Debug, "thread_id = {}", static_cast<pid_t>(thread_id));
-                 buffer += fmt::format("{:x},", static_cast<pid_t>(thread_id));
+             for (const auto& [thread_id, _] : thread_list_name) {
+                 const u32 encoded_tid = thread_list_pid_forTool[thread_id];
+                 LOG_INFO(Debug, "thread_id = {:#16x} encoded to {:#8x})", thread_id, encoded_tid);
+                 buffer += fmt::format("{:#8x},", encoded_tid);
              }
 
              // Remove trailing comma
@@ -407,7 +427,7 @@ std::string GdbStub::ReadRegisterAsString(const Register reg) {
     case Register::SS:
         asm volatile("mov %%ss, %0" : "=r"(value));
         break;
-    /*case Register::DS:
+    case Register::DS:
         asm volatile("mov %%ds, %0" : "=r"(value));
         break;
     case Register::ES:
@@ -418,9 +438,9 @@ std::string GdbStub::ReadRegisterAsString(const Register reg) {
         break;
     case Register::GS:
         asm volatile("mov %%gs, %0" : "=r"(value));
-        break;*/
+        break;
     default:
-        return "xxxxxxxxxxxxxxxx";
+        return "00000000000000";
     }
 
     std::string formatted;
@@ -457,7 +477,7 @@ void GdbStub::Run(const std::stop_token& stop) const {
 
         while (!stop.stop_requested()) {
             if (!HandleIncomingData(client)) {
-                LOG_ERROR(Debug, "Failed to handle incoming data");
+                // LOG_ERROR(Debug, "Failed to handle incoming data");
             }
         }
     }

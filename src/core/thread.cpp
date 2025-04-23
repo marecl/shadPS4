@@ -147,7 +147,11 @@ void NativeThread::Initialize() {
     sig_stack.ss_flags = 0;
     ASSERT_MSG(sigaltstack(&sig_stack, nullptr) == 0, "Failed to set signal stack: {}", errno);
 #endif
-    thread_list[tid] = "";
+
+    thread_list_name.erase(tid);
+    u32 tmp = thread_list_pid_forTool[tid];
+    thread_list_pid_forTool.erase(tid);
+    thread_list_pid_fromTool.erase(tmp);
 }
 
 } // namespace Core

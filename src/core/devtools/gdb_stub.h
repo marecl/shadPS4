@@ -62,7 +62,7 @@ private:
     };
 
     void CreateSocket();
-
+    void ReInit();
     static bool IsValidAddress(u64 address, u64 length);
     static bool ReadMemory(u64 address, u64 length, std::string* out);
     static GdbCommand ParsePacket(const std::string& data);
