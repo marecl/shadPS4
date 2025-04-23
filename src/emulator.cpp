@@ -22,7 +22,6 @@
 #include "common/polyfill_thread.h"
 #include "common/scm_rev.h"
 #include "common/singleton.h"
-#include "common/version.h"
 #include "core/devtools/gdb_stub.h"
 #include "core/file_format/psf.h"
 #include "core/file_format/trp.h"
