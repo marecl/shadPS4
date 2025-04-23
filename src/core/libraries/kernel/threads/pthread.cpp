@@ -10,6 +10,7 @@
 #include "core/libraries/kernel/threads/thread_state.h"
 #include "core/libraries/libs.h"
 #include "core/memory.h"
+#include "core/devtools/gdb/gdb_data.h"
 
 namespace Libraries::Kernel {
 
@@ -206,15 +207,7 @@ static void RunThread(void* arg) {
     DebugState.AddCurrentThreadToGuestList();
 
     curthread->native_thr.Initialize();
-
-    const auto thr_name = curthread->name.c_str();
-    const u64 thr_pid = curthread->native_thr.GetTid();
-    const u32 thr_pid_translated = 1 + ((~thr_pid) & 0x7FFFFFFF);
-
-    Core::thread_list_name[thr_pid] = thr_name;
-    Core::thread_list_pid_forTool[thr_pid] = thr_pid_translated;
-    Core::thread_list_pid_fromTool[thr_pid_translated] = thr_pid;
-    LOG_INFO(Debug, "Thread {} at {:16x} encoded to {:08x}", thr_name, thr_pid, thr_pid_translated);
+    Core::Devtools::GdbData::thread_register(curthread->native_thr.GetTid(),curthread->name.c_str());
 
     /* Run the current thread's start routine with argument: */
     void* ret = Core::ExecuteGuest(curthread->start_routine, curthread->arg);

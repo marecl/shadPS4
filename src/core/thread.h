@@ -16,11 +16,6 @@ namespace Core {
 using ThreadFunc = void (*)(void*);
 using PthreadFunc = void* (*)(void*);
 
-// For GDB
-inline std::unordered_map<u64, const char*> thread_list_name;
-inline std::unordered_map<u64, u32> thread_list_pid_forTool;  // for outside tools
-inline std::unordered_map<u32, u64> thread_list_pid_fromTool; // for internal use
-
 class NativeThread {
 public:
     NativeThread();

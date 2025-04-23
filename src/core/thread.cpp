@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/alignment.h"
+#include "core/devtools/gdb/gdb_data.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "thread.h"
 
@@ -133,7 +134,7 @@ void NativeThread::Initialize() {
 #if _WIN64
     tid = GetCurrentThreadId();
 #else
-    tid = (u64)pthread_self();
+    tid = static_cast<u64>(pthread_self());
 
     // Set up an alternate signal handler stack to avoid overflowing small thread stacks.
     const size_t page_size = getpagesize();
@@ -148,10 +149,7 @@ void NativeThread::Initialize() {
     ASSERT_MSG(sigaltstack(&sig_stack, nullptr) == 0, "Failed to set signal stack: {}", errno);
 #endif
 
-    thread_list_name.erase(tid);
-    u32 tmp = thread_list_pid_forTool[tid];
-    thread_list_pid_forTool.erase(tid);
-    thread_list_pid_fromTool.erase(tmp);
+    Core::Devtools::GdbData::thread_unregister(tid);
 }
 
 } // namespace Core

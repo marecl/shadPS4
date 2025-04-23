@@ -17,7 +17,8 @@
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/memory.h"
 #include "core/thread.h"
-#include "gdb/gdb_stub.h"
+#include "gdb_data.h"
+#include "gdb_stub.h"
 
 namespace Core::Devtools {
 
@@ -161,10 +162,8 @@ std::string BuildThreadList() {
     buffer += "l<?xml version=\"1.0\"?>\n";
     buffer += "<threads>\n";
 
-    for (auto& [pthread_id, thread_name] : thread_list_name) {
-        u32 tid_enc = thread_list_pid_forTool[pthread_id];
-        buffer +=
-            fmt::format(R"*(    <thread id="{:x}" name="{}"></thread>)*", tid_enc, thread_name);
+    for (auto& [name, id, id_enc] : Core::Devtools::GdbData::thread_list()) {
+        buffer += fmt::format(R"*(    <thread id="{:x}" name="{}"></thread>)*", id_enc, name);
         buffer += '\n';
     }
 
@@ -205,7 +204,7 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
          [&] {
              const auto tid_enc = std::stoull(
                  command.raw_data.substr(3, command.raw_data.find('#') - 3), nullptr, 16);
-             const u64 tid = thread_list_pid_fromTool[tid_enc];
+             const u64 tid = Core::Devtools::GdbData::thread_decode_id(tid_enc);
              LOG_INFO(Debug, "tid (Hc) = {:#8x} decoded to {:#16x}", tid_enc, tid);
 
              return OK;
@@ -213,10 +212,10 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
         {"Hg",
          // Select this particular thread
          [&] {
-             const auto encoded_tid = std::stoul(
+             const auto tid_enc = std::stoul(
                  command.raw_data.substr(3, command.raw_data.find('#') - 3), nullptr, 16);
-             const u64 tid = thread_list_pid_fromTool[encoded_tid];
-             LOG_INFO(Debug, "tid (Hg) = {:#8x} decoded to {:#16x}", encoded_tid, tid);
+             const u64 tid = Core::Devtools::GdbData::thread_decode_id(tid_enc);
+             LOG_INFO(Debug, "tid (Hg) = {:#8x} decoded to {:#16x}", tid_enc, tid);
 
              const pid_t thread_id = static_cast<pid_t>(tid);
 
@@ -316,10 +315,9 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
          [&] {
              std::string buffer = "m";
 
-             for (const auto& [thread_id, _] : thread_list_name) {
-                 const u32 encoded_tid = thread_list_pid_forTool[thread_id];
-                 LOG_INFO(Debug, "thread_id = {:#16x} encoded to {:#8x})", thread_id, encoded_tid);
-                 buffer += fmt::format("{:#8x},", encoded_tid);
+             for (auto& [name, id, id_enc] : GdbData::thread_list()) {
+                 LOG_INFO(Debug, "thread_id = {:#16x} encoded to {:#8x})", id, id_enc);
+                 buffer += fmt::format("{:#8x},", id_enc);
              }
 
              // Remove trailing comma

@@ -11,7 +11,7 @@
 #include "common/types.h"
 #include "core/address_space.h"
 #include "core/libraries/kernel/memory.h"
-#include "devtools/gdb_stub.h"
+#include "devtools/gdb/gdb_stub.h"
 
 namespace Vulkan {
 class Rasterizer;
