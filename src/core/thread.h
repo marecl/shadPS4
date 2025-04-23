@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <unordered_map>
+
 #include "common/types.h"
 
 namespace Libraries::Kernel {
@@ -13,6 +15,9 @@ namespace Core {
 
 using ThreadFunc = void (*)(void*);
 using PthreadFunc = void* (*)(void*);
+
+// For GDB
+inline std::unordered_map<u64, const char*> thread_list;
 
 class NativeThread {
 public:

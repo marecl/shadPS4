@@ -616,6 +616,8 @@ set(DEV_TOOLS src/core/devtools/layer.cpp
               src/core/devtools/widget/shader_list.h
               src/core/devtools/widget/text_editor.cpp
               src/core/devtools/widget/text_editor.h
+              src/core/devtools/gdb_stub.cpp
+              src/core/devtools/gdb_stub.h
 )
 
 set(COMMON src/common/logging/backend.cpp
