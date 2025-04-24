@@ -97,7 +97,7 @@ static u8 CalculateChecksum(const std::string& command) {
     return sum & 0xFF;
 }
 
-static std::string MakeResponse(const std::string& response) {
+std::string GdbStub::MakeResponse(const std::string& response) {
     return "+$" + response + "#" + fmt::format("{:02X}", CalculateChecksum(response));
 }
 
@@ -128,7 +128,7 @@ bool GdbStub::HandleIncomingData(const int client) {
         data = data.substr(1);
     }
 
-    const std::string reply = MakeResponse(HandleCommand(ParsePacket(data)));
+    const std::string reply = MakeResponse(handler(data));
     if (reply.empty()) {
         return false;
     }
@@ -165,8 +165,7 @@ pid_t GetTid(const pthread_t ptid) {
 // Modified from xenia a little bit
 std::string BuildThreadList() {
     std::string buffer;
-    buffer += "l<?xml version=\"1.0\"?>\n";
-    buffer += "<threads>\n";
+    buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
 
     for (auto& [name, id, id_enc] : Core::Devtools::GdbData::thread_list()) {
         buffer += fmt::format(R"*(    <thread id="{:x}" name="{}" handle="{:x}"></thread>)*",
@@ -185,10 +184,134 @@ static ThreadID selectedThread = 0;
 static ucontext_t selectedCtx = wwe[selectedThread];
 static bool vMustReplyEmpty = false; // Empty string on unknown command
 
+std::string GdbStub::handler(const std::string& data) {
+    LOG_INFO(Debug, "GDB Received: {}", data);
+    char category = data[0];
+
+    // ignore format at first lol
+    const std::string remainder = data.substr(1, data.find_first_of('#'));
+
+    switch (category) {
+    default:
+        break;
+    case '!':
+        return OK;
+
+    case 'H': // handle threads
+        break;
+        // these apply to threads too
+        // the problem is, that gdb expects the main thread to be active
+        // so i need to figure out how to address GAME_MainThread
+    case 'g':
+        break; // read general registers
+    case 'G':
+        break; // write general registers
+    case 'm':  // m addr,length read
+        break;
+    case 'M': // M addr,length:XX write
+        break;
+    case 'p': // p m reg read
+        break;
+    case 'P': // P n=x reg write
+        break;
+    case 'x': // same as m but binary
+        break;
+    case 'X': // same as M but binary
+        break;
+
+        // advanced
+    case 'v': // Special, multiletter, until first ; OR until first ? OR until EOS
+        return handle_v_packet(remainder);
+
+    case 'q':
+        return handle_q_packet(remainder);
+    case 'Q':
+        return handle_Q_packet(remainder);
+
+    case 'r':
+    case 'R':
+        return "E.Target reset not allowed";
+
+    case 'z': // insert breakpoint (0-SW, 1-HW, 2-write, 3-read, 4-access)
+        break;
+    case 'Z': // remove breakpoint
+        break;
+    }
+    return "E.Stub";
+}
+
+std::string GdbStub::handle_v_packet(const std::string data) {
+    auto semicolonPos = data.find_first_of(';');
+    auto questionPos = data.find_first_of('?');
+
+    std::string command;
+    std::string args = "";
+
+    if (questionPos == semicolonPos == std::string::npos)
+        command = data;
+    else {
+        auto endPos = semicolonPos > questionPos ? questionPos : semicolonPos;
+        command = data.substr(0, endPos);
+        args = data.substr(endPos);
+    }
+
+    if (command == "Cont?") {
+        // supported commands for vCont
+        // vCont[;action;...]
+    }
+    if (command == "Cont;") {
+        // vCont[;action[:thread-id]]
+        //  c C [sig] s S [sig] t r
+    }
+    if (command == "MustReplyEmpty")
+        return "";
+
+    return std::format("E.Not implemented: {}", command);
+}
+
+std::string GdbStub::handle_q_packet(const std::string data) {
+    auto semicolonPos = data.find_first_of(';');
+    auto questionPos = data.find_first_of('?');
+
+    std::string command;
+    std::string args = "";
+
+    if (questionPos == semicolonPos == std::string::npos)
+        command = data;
+    else {
+        auto endPos = semicolonPos > questionPos ? questionPos : semicolonPos;
+        command = data.substr(0, endPos);
+        args = data.substr(endPos);
+    }
+
+    if (command == "Cont?") {
+        // supported commands for vCont
+        // vCont[;action;...]
+    }
+    if (command == "Cont;") {
+        // vCont[;action[:thread-id]]
+        //  c C [sig] s S [sig] t r
+    }
+    if (command == "MustReplyEmpty")
+        return "";
+
+    if (command == "Xfer:features")
+        return target_description;
+    if (command == "Xfer:threads")
+        return BuildThreadList();
+    if (command == "fThreadInfo") {
+        // send MAIN THREAD!!! m thread-id
+    }
+    if (command == "qsThreadInfo") {
+        // send remaining threads! m tid,tid.. l (male l - koniec listy)
+    }
+
+    return std::format("E.Not implemented: {}", command);
+}
+
+/*
 std::string GdbStub::HandleCommand(const GdbCommand& command) {
     LOG_INFO(Debug, "command.cmd = {} | command.arg = {}", command.cmd, command.raw_data);
-
-    DebugState.PauseGuestThreads();
 
     ucontext_t* ctx = &selectedCtx;
     if (selectedThread != 0) {
@@ -207,205 +330,13 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
         LOG_INFO(Debug, "\t->Stack Dump: {}", out);
     }
 
-    static const std::unordered_map<std::string, std::function<std::string()>> command_table{
-        {"!", [&] { return OK; }},
-        {"?", [&] { return "S05"; }},
-        {"Hg0", [&] { return OK; }},
-        {"Z",
-         [&] {
-             // const u64 address = std::stoull(command.raw_data.substr(4, 9), nullptr, 16);
-             return OK;
-         }},
-        {"g",
-         [&] {
-             std::string regs = "";
-
-             // TODO: Is there a way to do this with a custom match function?
-             magic_enum::enum_for_each<Register>([&regs, ctx](auto val) {
-                 constexpr Register reg = val;
-                 u64 regval = ctx->uc_mcontext.gregs[static_cast<u8>(reg)];
-
-                 LOG_INFO(Debug, "Reading reg: {} - {} - {:x}", magic_enum::enum_name(reg),
-                          static_cast<u8>(reg), regval);
-
-                 std::string formatted;
-#if defined(__GNUC__)
-                 formatted = fmt::format("{:016x}", __builtin_bswap64(regval));
-#elif defined(_MSC_VER)
-                 formatted = fmt::format("{:016x}", _byteswap_uint64(regval));
-#else
-#error "What the fuck is this compiler"
-#endif
-                 LOG_INFO(Debug, "Endian swapped value of {} is '{}'", magic_enum::enum_name(reg),
-                          formatted);
-                 regs += formatted;
-             });
-
-             return regs;
-         }},
-        {"Hc",
-         [&] {
-             const auto tid_enc = std::stoull(
-                 command.raw_data.substr(3, command.raw_data.find('#') - 3), nullptr, 16);
-             // const Pthread* pthr = Core::Devtools::GdbData::thread_decode_id(tid_enc);
-             LOG_INFO(Debug, "tid (Hc) = {:x} decoded to ", tid_enc);
-
-             for (auto& [uu1, id, uuu1] : Core::Devtools::GdbData::thread_list()) {
-                 if (tid_enc == id)
-                     return OK;
-             }
-             return E01;
-         }},
-        {"Hg",
-         // Select this particular thread
-         [&, qq = &selectedThread] {
-             const auto tid_enc = std::stoul(
-                 command.raw_data.substr(3, command.raw_data.find('#') - 3), nullptr, 16);
-
-             u64 pthr = Core::Devtools::GdbData::thread_decode_id(tid_enc);
-
-             LOG_INFO(Debug, "tid (Hc) = {:x} decoded to {:x}", tid_enc, pthr);
-
-             if (pthr == 0 || pthr == -1)
-                 return E01;
-
-             char XD[128];
-             pthread_getname_np(pthr, XD, 256);
-             std::string thrname = std::string(XD);
-             LOG_INFO(Debug, "XDXDXD {} XDXDXD", thrname);
-
-             u64 thread_id = pthr;
-             *qq = pthr;
-
-             return OK;
-         }},
-        {"m",
-         [&] -> std::string {
-             if (const size_t comma_pos = command.raw_data.find(',');
-                 comma_pos != std::string::npos) {
-                 const u64 address =
-                     std::stoull(command.raw_data.substr(2, comma_pos - 1), nullptr, 16);
-                 const u64 length =
-                     std::stoull(command.raw_data.substr(comma_pos + 1), nullptr, 16);
-                 std::string memory{};
-
-                 if (!ReadMemory(address, length, &memory)) {
-                     return E01;
-                 }
-
-                 return memory;
-             }
-
-             return E01;
-         }},
-        {"p",
-         [&, ctx = &selectedCtx] {
-             auto targetReg =
-                 std::stoi(command.raw_data.substr(2, command.raw_data.find('#') - 2), nullptr, 16);
-
-             ucontext_t selCtx = *ctx;
-             auto regVal = selCtx.uc_mcontext.gregs[targetReg];
-
-             LOG_INFO(Debug, "Reading reg no {} -> {:x}", targetReg, regVal);
-
-             if (targetReg <= 17)
-                 return std::format("{:016x}", regVal);
-
-             // if( targetReg<=)
-
-             return std::string("0000000000000000");
-         }},
-        {"qAttached", [&] { return "1"; }},
-        {"qC", [&] { return fmt::format("QC {:x}", gettid()); }},
-        {"qSupported",
-         [&] { return "PacketSize=1024;qXfer:features:read+;qXfer:threads:read+;binary-upload+"; }},
-        {"qTStatus", [&] { return "T1;tnotrun:0"; }},
-        // List of
-        // ‘QTDV:n:value:builtin:name’
-        // Ending with empty string
-        {"qTfV", [&] -> std::string { return ""; }},
-        {"qTsV", [&] -> std::string { return ""; }},
-        {"qTfP", [&] -> std::string { return ""; }},
-        {"qTsP", [&] -> std::string { return ""; }},
-
-        {"qXfer",
-         [&] -> std::string {
-             auto param = command.raw_data;
-             if (!param.empty() && param[0] == '$') {
-                 param = param.substr(7);
-             }
-
-             const auto sub_cmd = param.substr(0, param.find(':'));
-             if (sub_cmd == "features") {
-                 LOG_INFO(Debug, "qXfer:features");
-                 return target_description;
-             }
-             if (sub_cmd == "threads") {
-                 LOG_INFO(Debug, "qXfer:threads");
-                 return BuildThreadList();
-             }
-
-             LOG_INFO(Debug, "Raw data: '{}'", command.raw_data);
-             LOG_INFO(Debug, "Unhandled qXfer subcommand '{}'", sub_cmd);
-
-             return E01;
-         }},
-        {"qfThreadInfo", // IDA uses this but then decides to use qXfer:threads:read instead
-         [&] {
-             std::string buffer = "m";
-
-             for (auto& [name, id, id_enc] : GdbData::thread_list()) {
-                 LOG_INFO(Debug, "thread_id = {:#16x} encoded to {:#8x})", id, id_enc);
-                 buffer += fmt::format("{:#8x},", id_enc);
-             }
-
-             // Remove trailing comma
-             buffer.pop_back();
-
-             // Specify end of list
-             buffer += "l";
-
-             return buffer;
-         }},
-        {"vCont?", [&] { return "vCont;s;c;t"; }},
-        {"vCont", [] { return OK; }},
-        {"vMustReplyEmpty",
-         [&, tmp = &vMustReplyEmpty] {
-             *tmp = true;
-             return "";
-         }},
-        {"x",
-         [&] -> std::string {
-             if (const size_t comma_pos = command.raw_data.find(',');
-                 comma_pos != std::string::npos) {
-                 const u64 address =
-                     std::stoull(command.raw_data.substr(2, comma_pos - 1), nullptr, 16);
-                 const u64 length =
-                     std::stoull(command.raw_data.substr(comma_pos + 1, 3), nullptr, 16);
-                 std::string memory;
-
-                 LOG_INFO(Debug, "Read addr: {:x} len: {:x}", address, length);
-
-                 if (!ReadMemory(address, length, &memory)) {
-                     return E01;
-                 }
-
-                 return memory;
-             }
-
-             return E01;
-         }},
-    };
-
-    DebugState.ResumeGuestThreads();
-
     if (const auto it = command_table.find(command.cmd); it != command_table.end()) {
         return it->second();
     }
 
     LOG_ERROR(Debug, "Unhandled command '{}'", command.cmd);
     return vMustReplyEmpty ? "" : E01;
-}
+}*/
 
 std::string GdbStub::ReadRegisterAsString(const Register reg) {
     u64 value = 0;

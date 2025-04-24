@@ -59,10 +59,17 @@ private:
     static bool IsValidAddress(u64 address, u64 length);
     static bool ReadMemory(u64 address, u64 length, std::string* out);
     static GdbCommand ParsePacket(const std::string& data);
-    static bool HandleIncomingData(int client);
+    bool HandleIncomingData(int client);
     static std::string HandleCommand(const GdbCommand& command);
 
     static std::string ReadRegisterAsString(Register reg);
+    std::string MakeResponse(const std::string& response);
+    std::string handler(const std::string& data);
+    std::string handle_v_packet(std::string data);
+    std::string handle_q_packet(std::string data);
+    std::string handle_Q_packet(std::string data) {
+        return "E.Stub";
+    }
 
     void Run(const std::stop_token& stop) const;
 };
