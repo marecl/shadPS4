@@ -13,6 +13,7 @@
 
 #include "common/assert.h"
 #include "common/debug.h"
+#include "core/debug_state.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/memory.h"
@@ -20,7 +21,12 @@
 #include "gdb_data.h"
 #include "gdb_stub.h"
 
+using namespace DebugStateType;
+using namespace ::Libraries::Kernel;
+
 namespace Core::Devtools {
+
+DebugStateImpl& DebugState = *Common::Singleton<DebugStateImpl>::Instance();
 
 constexpr auto OK = "OK";
 constexpr auto E01 = "E01";
@@ -171,6 +177,8 @@ std::string BuildThreadList() {
     return buffer;
 }
 
+#include <pthread.h>
+
 std::string GdbStub::HandleCommand(const GdbCommand& command) {
     LOG_INFO(Debug, "command.cmd = {} | command.arg = {}", command.cmd, command.raw_data);
 
@@ -204,8 +212,8 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
          [&] {
              const auto tid_enc = std::stoull(
                  command.raw_data.substr(3, command.raw_data.find('#') - 3), nullptr, 16);
-             const u64 tid = Core::Devtools::GdbData::thread_decode_id(tid_enc);
-             LOG_INFO(Debug, "tid (Hc) = {:#8x} decoded to {:#16x}", tid_enc, tid);
+             // const Pthread* pthr = Core::Devtools::GdbData::thread_decode_id(tid_enc);
+             LOG_INFO(Debug, "tid (Hc) = {:x} decoded to ", tid_enc);
 
              return OK;
          }},
@@ -214,24 +222,34 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
          [&] {
              const auto tid_enc = std::stoul(
                  command.raw_data.substr(3, command.raw_data.find('#') - 3), nullptr, 16);
-             const u64 tid = Core::Devtools::GdbData::thread_decode_id(tid_enc);
-             LOG_INFO(Debug, "tid (Hg) = {:#8x} decoded to {:#16x}", tid_enc, tid);
 
-             const pid_t thread_id = static_cast<pid_t>(tid);
+             u64 pthr = Core::Devtools::GdbData::thread_decode_id(tid_enc);
+
+             LOG_INFO(Debug, "tid (Hc) = {:x} decoded to {:x}", tid_enc, pthr);
+
+             if (pthr == 0 || pthr == -1)
+                 return E01;
+
+             char XD[128];
+             pthread_getname_np(pthr, XD, 256);
+             std::string thrname = std::string(XD);
+             LOG_INFO(Debug, "XDXDXD {} XDXDXD", thrname);
+
+             u64 thread_id = pthr;
 
 #if defined(__linux__)
              user_regs_struct regs{};
 
              if (ptrace(PTRACE_SEIZE, thread_id, nullptr, nullptr) == -1) {
-                 LOG_ERROR(Debug, "Failed to seize thread {}, {}", tid, strerror(errno));
+                 LOG_ERROR(Debug, "Failed to seize thread {:x}, {}", thread_id, strerror(errno));
                  return E01;
              }
 
              ptrace(PTRACE_INTERRUPT, thread_id, nullptr, nullptr); // Stop the thread manually
-             waitpid(tid, nullptr, 0);
+             waitpid(thread_id, nullptr, 0);
 
              if (ptrace(PTRACE_GETREGS, thread_id, nullptr, &regs) == -1) {
-                 LOG_ERROR(Debug, "Failed to get registers for thread {}, {}", thread_id,
+                 LOG_ERROR(Debug, "Failed to get registers for thread {:x}, {:x}", thread_id,
                            strerror(errno));
                  ptrace(PTRACE_DETACH, thread_id, nullptr, nullptr);
                  return E01;
@@ -241,6 +259,8 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
 
              LOG_INFO(Debug, "RAX: {:016x}", regs.rax);
              LOG_INFO(Debug, "RIP: {:016x}", regs.rip);
+
+             DebugState.ResumeGuestThreads();
 
 #elif defined(_WIN32)
 #endif
@@ -338,8 +358,10 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
                  const u64 address =
                      std::stoull(command.raw_data.substr(2, comma_pos - 1), nullptr, 16);
                  const u64 length =
-                     std::stoull(command.raw_data.substr(comma_pos + 1), nullptr, 16);
+                     std::stoull(command.raw_data.substr(comma_pos + 1, 3), nullptr, 16);
                  std::string memory;
+
+                 LOG_INFO(Debug, "Read addr: {:x} len: {:x}", address, length);
 
                  if (!ReadMemory(address, length, &memory)) {
                      return E01;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/alignment.h"
-#include "core/devtools/gdb/gdb_data.h"
+// #include "core/devtools/gdb/gdb_data.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "thread.h"
 
@@ -149,7 +149,7 @@ void NativeThread::Initialize() {
     ASSERT_MSG(sigaltstack(&sig_stack, nullptr) == 0, "Failed to set signal stack: {}", errno);
 #endif
 
-    Core::Devtools::GdbData::thread_unregister(tid);
+    // Core::Devtools::GdbData::thread_unregister(tid);
 }
 
 } // namespace Core

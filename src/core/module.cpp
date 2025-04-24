@@ -14,6 +14,7 @@
 #include "core/memory.h"
 #include "core/module.h"
 #include "core/tls.h"
+#include "devtools/gdb/gdb_data.h"
 
 namespace Core {
 
@@ -97,7 +98,7 @@ Module::~Module() = default;
 
 s32 Module::Start(u64 args, const void* argp, void* param) {
     const VAddr addr = dynamic_info.init_virtual_addr + GetBaseAddress();
-    LOG_INFO(Core_Linker, "Module started at {:#02x} : {}", addr,name);
+    LOG_INFO(Core_Linker, "Module started at {:#02x} : {}", addr, name);
     return ExecuteGuest(reinterpret_cast<EntryFunc>(addr), args, argp, param);
 }
 
@@ -223,6 +224,8 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
 
     const VAddr entry_addr = base_virtual_addr + elf.GetElfEntry();
     LOG_INFO(Core_Linker, "program entry addr ..........: {:#018x}", entry_addr);
+
+    Core::Devtools::GdbData::loadable_register(base_virtual_addr, base_size, name);
 
     if (MemoryPatcher::g_eboot_address == 0) {
         if (name == "eboot") {

@@ -11,7 +11,6 @@
 #include "common/types.h"
 #include "core/address_space.h"
 #include "core/libraries/kernel/memory.h"
-#include "devtools/gdb/gdb_stub.h"
 
 namespace Vulkan {
 class Rasterizer;
@@ -272,7 +271,7 @@ private:
     Vulkan::Rasterizer* rasterizer{};
 
     friend class ::Core::Devtools::Widget::MemoryMapViewer;
-    friend class ::Core::Devtools::GdbStub;
+    //friend class ::Core::Devtools::GdbStub;
 };
 
 using Memory = Common::Singleton<MemoryManager>;

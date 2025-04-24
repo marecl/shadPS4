@@ -59,7 +59,30 @@ void DebugStateImpl::RemoveCurrentThreadFromGuestList() {
     std::erase_if(guest_threads, [&](const ThreadID& v) { return v == id; });
 }
 
+std::mutex global_mutex;
+std::unordered_map<ThreadID, ucontext_t> captured_contexts;
+std::unordered_map<ThreadID, std::condition_variable> cond_vars;
+std::unordered_map<ThreadID, std::mutex> cond_mutexes;
+std::unordered_map<ThreadID, std::atomic<bool>> ready_flags;
+
+static void capture_context_handler(int sig, siginfo_t* si, void* ucontext) {
+    ThreadID this_id = pthread_self();
+
+    std::unique_lock<std::mutex> lock(cond_mutexes[this_id]);
+    std::memcpy(&captured_contexts[this_id], ucontext, sizeof(ucontext_t));
+    ready_flags[this_id] = true;
+    cond_vars[this_id].notify_one();
+}
+
 void DebugStateImpl::PauseGuestThreads() {
+    struct sigaction sa = {0};
+    sa.sa_flags = SA_SIGINFO;
+    sa.sa_sigaction = capture_context_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGUSR1, &sa, NULL);
+
+    captured_contexts.clear();
+
     using namespace Libraries::MsgDialog;
     std::unique_lock lock{guest_threads_mutex};
     if (is_guest_threads_paused) {
@@ -71,16 +94,33 @@ void DebugStateImpl::PauseGuestThreads() {
     }
     bool self_guest = false;
     ThreadID self_id = ThisThreadID();
+
     for (const auto& id : guest_threads) {
         if (id == self_id) {
             self_guest = true;
         } else {
             PauseThread(id);
+            std::unique_lock<std::mutex> lock(cond_mutexes[id]);
+            cond_vars[id].wait(lock, [&] { return ready_flags[id].load(); });
         }
     }
+
     pause_time = Libraries::Kernel::Dev::GetClock()->GetUptime();
     is_guest_threads_paused = true;
     lock.unlock();
+
+    for (auto& [id, ctx] : captured_contexts) {
+        std::string out = "";
+        u8 bfr[16];
+        memcpy(bfr, reinterpret_cast<u8*>(ctx.uc_stack.ss_sp)+ctx.uc_stack.ss_size - 16, 16);
+
+        for (u8 i = 0; i < 16; i++)
+            out += std::format("{:02x} ", bfr[i]);
+        LOG_INFO(Debug, "{:x} -> RIP: {:x}", reinterpret_cast<u64>(id),
+                 ctx.uc_mcontext.gregs[REG_RIP]);
+        LOG_INFO(Debug, "\t->Stack Dump: {}", out);
+    }
+
     if (self_guest) {
         PauseThread(self_id);
     }
