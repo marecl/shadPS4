@@ -169,7 +169,8 @@ std::string BuildThreadList() {
     buffer += "<threads>\n";
 
     for (auto& [name, id, id_enc] : Core::Devtools::GdbData::thread_list()) {
-        buffer += fmt::format(R"*(    <thread id="{:x}" name="{}"></thread>)*", id_enc, name);
+        buffer += fmt::format(R"*(    <thread id="{:x}" name="{}" handle="{:x}"></thread>)*",
+                              id_enc, name, id_enc);
         buffer += '\n';
     }
 
@@ -179,8 +180,32 @@ std::string BuildThreadList() {
 
 #include <pthread.h>
 
+auto wwe = DebugState.cctx;
+static ThreadID selectedThread = 0;
+static ucontext_t selectedCtx = wwe[selectedThread];
+static bool vMustReplyEmpty = false; // Empty string on unknown command
+
 std::string GdbStub::HandleCommand(const GdbCommand& command) {
     LOG_INFO(Debug, "command.cmd = {} | command.arg = {}", command.cmd, command.raw_data);
+
+    DebugState.PauseGuestThreads();
+
+    ucontext_t* ctx = &selectedCtx;
+    if (selectedThread != 0) {
+        selectedCtx = wwe[selectedThread];
+
+        std::string out = "";
+        u8 bfr[32];
+        memcpy(bfr, ctx->uc_stack.ss_sp - 32, 32);
+
+        for (u8 i = 0; i < 32; i++)
+            out += std::format("{:02x} ", bfr[i]);
+        LOG_INFO(Debug, "{:x} -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: {:x}",
+                 reinterpret_cast<u64>(selectedThread), ctx->uc_mcontext.gregs[REG_RIP],
+                 ctx->uc_mcontext.gregs[REG_RDI], ctx->uc_mcontext.gregs[REG_RSI],
+                 ctx->uc_mcontext.gregs[REG_RBP], ctx->uc_mcontext.gregs[REG_RBX]);
+        LOG_INFO(Debug, "\t->Stack Dump: {}", out);
+    }
 
     static const std::unordered_map<std::string, std::function<std::string()>> command_table{
         {"!", [&] { return OK; }},
@@ -193,17 +218,27 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
          }},
         {"g",
          [&] {
-             int i = 0;
-             std::string regs;
+             std::string regs = "";
 
              // TODO: Is there a way to do this with a custom match function?
-             magic_enum::enum_for_each<Register>([&i, &regs](auto val) {
-                 ++i;
+             magic_enum::enum_for_each<Register>([&regs, ctx](auto val) {
+                 constexpr Register reg = val;
+                 u64 regval = ctx->uc_mcontext.gregs[static_cast<u8>(reg)];
 
-                 if (i <= 17) {
-                     constexpr Register reg = val;
-                     regs += ReadRegisterAsString(reg);
-                 }
+                 LOG_INFO(Debug, "Reading reg: {} - {} - {:x}", magic_enum::enum_name(reg),
+                          static_cast<u8>(reg), regval);
+
+                 std::string formatted;
+#if defined(__GNUC__)
+                 formatted = fmt::format("{:016x}", __builtin_bswap64(regval));
+#elif defined(_MSC_VER)
+                 formatted = fmt::format("{:016x}", _byteswap_uint64(regval));
+#else
+#error "What the fuck is this compiler"
+#endif
+                 LOG_INFO(Debug, "Endian swapped value of {} is '{}'", magic_enum::enum_name(reg),
+                          formatted);
+                 regs += formatted;
              });
 
              return regs;
@@ -215,11 +250,15 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
              // const Pthread* pthr = Core::Devtools::GdbData::thread_decode_id(tid_enc);
              LOG_INFO(Debug, "tid (Hc) = {:x} decoded to ", tid_enc);
 
-             return OK;
+             for (auto& [uu1, id, uuu1] : Core::Devtools::GdbData::thread_list()) {
+                 if (tid_enc == id)
+                     return OK;
+             }
+             return E01;
          }},
         {"Hg",
          // Select this particular thread
-         [&] {
+         [&, qq = &selectedThread] {
              const auto tid_enc = std::stoul(
                  command.raw_data.substr(3, command.raw_data.find('#') - 3), nullptr, 16);
 
@@ -236,34 +275,7 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
              LOG_INFO(Debug, "XDXDXD {} XDXDXD", thrname);
 
              u64 thread_id = pthr;
-
-#if defined(__linux__)
-             user_regs_struct regs{};
-
-             if (ptrace(PTRACE_SEIZE, thread_id, nullptr, nullptr) == -1) {
-                 LOG_ERROR(Debug, "Failed to seize thread {:x}, {}", thread_id, strerror(errno));
-                 return E01;
-             }
-
-             ptrace(PTRACE_INTERRUPT, thread_id, nullptr, nullptr); // Stop the thread manually
-             waitpid(thread_id, nullptr, 0);
-
-             if (ptrace(PTRACE_GETREGS, thread_id, nullptr, &regs) == -1) {
-                 LOG_ERROR(Debug, "Failed to get registers for thread {:x}, {:x}", thread_id,
-                           strerror(errno));
-                 ptrace(PTRACE_DETACH, thread_id, nullptr, nullptr);
-                 return E01;
-             }
-
-             ptrace(PTRACE_DETACH, thread_id, nullptr, nullptr);
-
-             LOG_INFO(Debug, "RAX: {:016x}", regs.rax);
-             LOG_INFO(Debug, "RIP: {:016x}", regs.rip);
-
-             DebugState.ResumeGuestThreads();
-
-#elif defined(_WIN32)
-#endif
+             *qq = pthr;
 
              return OK;
          }},
@@ -287,14 +299,21 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
              return E01;
          }},
         {"p",
-         [&] {
+         [&, ctx = &selectedCtx] {
              auto targetReg =
                  std::stoi(command.raw_data.substr(2, command.raw_data.find('#') - 2), nullptr, 16);
 
-             LOG_INFO(Debug, "Reading reg no {}", targetReg);
-             const auto reg = static_cast<Register>(targetReg);
+             ucontext_t selCtx = *ctx;
+             auto regVal = selCtx.uc_mcontext.gregs[targetReg];
 
-             return ReadRegisterAsString(reg);
+             LOG_INFO(Debug, "Reading reg no {} -> {:x}", targetReg, regVal);
+
+             if (targetReg <= 17)
+                 return std::format("{:016x}", regVal);
+
+             // if( targetReg<=)
+
+             return std::string("0000000000000000");
          }},
         {"qAttached", [&] { return "1"; }},
         {"qC", [&] { return fmt::format("QC {:x}", gettid()); }},
@@ -348,9 +367,13 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
 
              return buffer;
          }},
-        {"vCont?", [&] { return "vCont;c;t"; }},
+        {"vCont?", [&] { return "vCont;s;c;t"; }},
         {"vCont", [] { return OK; }},
-        {"vMustReplyEmpty", [&] { return ""; }},
+        {"vMustReplyEmpty",
+         [&, tmp = &vMustReplyEmpty] {
+             *tmp = true;
+             return "";
+         }},
         {"x",
          [&] -> std::string {
              if (const size_t comma_pos = command.raw_data.find(',');
@@ -374,12 +397,14 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
          }},
     };
 
+    DebugState.ResumeGuestThreads();
+
     if (const auto it = command_table.find(command.cmd); it != command_table.end()) {
         return it->second();
     }
 
     LOG_ERROR(Debug, "Unhandled command '{}'", command.cmd);
-    return E01;
+    return vMustReplyEmpty ? "" : E01;
 }
 
 std::string GdbStub::ReadRegisterAsString(const Register reg) {
@@ -438,27 +463,27 @@ std::string GdbStub::ReadRegisterAsString(const Register reg) {
     case Register::RIP:
         asm volatile("lea (%%rip), %0" : "=r"(value));
         break;
-    case Register::EFLAGS:
-        asm volatile("pushfq; pop %0" : "=r"(value));
-        break;
-    case Register::CS:
-        asm volatile("mov %%cs, %0" : "=r"(value));
-        break;
-    case Register::SS:
-        asm volatile("mov %%ss, %0" : "=r"(value));
-        break;
-    case Register::DS:
-        asm volatile("mov %%ds, %0" : "=r"(value));
-        break;
-    case Register::ES:
-        asm volatile("mov %%es, %0" : "=r"(value));
-        break;
-    case Register::FS:
-        asm volatile("mov %%fs, %0" : "=r"(value));
-        break;
-    case Register::GS:
-        asm volatile("mov %%gs, %0" : "=r"(value));
-        break;
+        /*   case Register::EFLAGS:
+               asm volatile("pushfq; pop %0" : "=r"(value));
+               break;
+           case Register::CS:
+               asm volatile("mov %%cs, %0" : "=r"(value));
+               break;
+           case Register::SS:
+               asm volatile("mov %%ss, %0" : "=r"(value));
+               break;
+           case Register::DS:
+               asm volatile("mov %%ds, %0" : "=r"(value));
+               break;
+           case Register::ES:
+               asm volatile("mov %%es, %0" : "=r"(value));
+               break;
+           case Register::FS:
+               asm volatile("mov %%fs, %0" : "=r"(value));
+               break;
+           case Register::GS:
+               asm volatile("mov %%gs, %0" : "=r"(value));
+               break;*/
     default:
         return "00000000000000";
     }

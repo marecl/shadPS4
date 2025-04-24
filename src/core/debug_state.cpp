@@ -59,7 +59,6 @@ void DebugStateImpl::RemoveCurrentThreadFromGuestList() {
     std::erase_if(guest_threads, [&](const ThreadID& v) { return v == id; });
 }
 
-std::mutex global_mutex;
 std::unordered_map<ThreadID, ucontext_t> captured_contexts;
 std::unordered_map<ThreadID, std::condition_variable> cond_vars;
 std::unordered_map<ThreadID, std::mutex> cond_mutexes;
@@ -109,20 +108,23 @@ void DebugStateImpl::PauseGuestThreads() {
     is_guest_threads_paused = true;
     lock.unlock();
 
-    for (auto& [id, ctx] : captured_contexts) {
-        std::string out = "";
-        u8 bfr[16];
-        memcpy(bfr, reinterpret_cast<u8*>(ctx.uc_stack.ss_sp)+ctx.uc_stack.ss_size - 16, 16);
-
-        for (u8 i = 0; i < 16; i++)
-            out += std::format("{:02x} ", bfr[i]);
-        LOG_INFO(Debug, "{:x} -> RIP: {:x}", reinterpret_cast<u64>(id),
-                 ctx.uc_mcontext.gregs[REG_RIP]);
-        LOG_INFO(Debug, "\t->Stack Dump: {}", out);
-    }
-
     if (self_guest) {
         PauseThread(self_id);
+    }
+
+    cctx = captured_contexts;
+    for (auto& [id, ctx] : captured_contexts) {
+        std::string out = "";
+        u8 bfr[32];
+        memcpy(bfr, ctx.uc_stack.ss_sp - 32, 32);
+
+        for (u8 i = 0; i < 32; i++)
+            out += std::format("{:02x} ", bfr[i]);
+        /*LOG_INFO(Debug, "{:x} -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: {:x}",
+                 reinterpret_cast<u64>(id), ctx.uc_mcontext.gregs[REG_RIP],
+                 ctx.uc_mcontext.gregs[REG_RDI], ctx.uc_mcontext.gregs[REG_RSI],
+                 ctx.uc_mcontext.gregs[REG_RBP], ctx.uc_mcontext.gregs[REG_RBX]);
+        LOG_INFO(Debug, "\t->Stack Dump: {}", out);*/
     }
 }
 

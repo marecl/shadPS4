@@ -8,6 +8,26 @@
 namespace Core::Devtools {
 
 class GdbStub {
+    enum class Register : int {
+        RAX = REG_RAX,
+        RBX = REG_RBX,
+        RCX = REG_RCX,
+        RDX = REG_RDX,
+        RSI = REG_RSI,
+        RDI = REG_RDI,
+        RBP = REG_RBP,
+        RSP = REG_RSP,
+        R8 = REG_R8,
+        R9 = REG_R9,
+        R10 = REG_R10,
+        R11 = REG_R11,
+        R12 = REG_R12,
+        R13 = REG_R13,
+        R14 = REG_R14,
+        R15 = REG_R15,
+        RIP = REG_RIP,
+    };
+
 public:
     explicit GdbStub(u16 port);
 
@@ -32,33 +52,6 @@ private:
         std::string cmd{};
         std::string raw_data{};
         u8 checksum{};
-    };
-
-    enum class Register : int {
-        RAX = 0,
-        RBX,
-        RCX,
-        RDX,
-        RSI,
-        RDI,
-        RBP,
-        RSP,
-        R8,
-        R9,
-        R10,
-        R11,
-        R12,
-        R13,
-        R14,
-        R15,
-        RIP,
-        EFLAGS,
-        CS,
-        SS,
-        DS,
-        ES,
-        FS,
-        GS,
     };
 
     void CreateSocket();

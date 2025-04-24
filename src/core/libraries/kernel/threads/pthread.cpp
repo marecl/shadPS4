@@ -209,7 +209,6 @@ static void RunThread(void* arg) {
     curthread->native_thr.Initialize();
     //Core::Devtools::GdbData::thread_register(curthread->native_thr.GetTid(),curthread->name.c_str());
     Core::Devtools::GdbData::thread_register(curthread->native_thr.GetTid());
-    LOG_INFO(Debug, "XDDDDDXDDDDDDDd {:x} ------ {:x}",curthread->native_thr.GetTid(),curthread->native_thr.GetPid());
 
     /* Run the current thread's start routine with argument: */
     void* ret = Core::ExecuteGuest(curthread->start_routine, curthread->arg);

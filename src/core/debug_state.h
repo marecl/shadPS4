@@ -155,6 +155,8 @@ class DebugStateImpl {
     std::vector<ShaderDump> shader_dump_list{};
 
 public:
+std::unordered_map<ThreadID, ucontext_t> cctx;
+
     float Framerate = 1.0f / 60.0f;
     float FrameDeltaTime;
 
