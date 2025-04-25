@@ -49,9 +49,9 @@ private:
 
     // Taken from xenia
     struct GdbCommand {
+        std::string raw{};
         std::string cmd{};
-        std::string raw_data{};
-        u8 checksum{};
+        std::string arg{};
     };
 
     void CreateSocket();
@@ -59,19 +59,19 @@ private:
     static bool IsValidAddress(u64 address, u64 length);
     static bool ReadMemory(u64 address, u64 length, std::string* out);
     static GdbCommand ParsePacket(const std::string& data);
-    bool HandleIncomingData(int client);
-    static std::string HandleCommand(const GdbCommand& command);
+    bool HandleIncomingData(const int client);
+    static GdbStub::GdbCommand HandleCommand(const GdbCommand& command);
 
     static std::string ReadRegisterAsString(Register reg);
     std::string MakeResponse(const std::string& response);
-    std::string handler(const std::string& data);
-    std::string handle_v_packet(std::string data);
-    std::string handle_q_packet(std::string data);
-    std::string handle_Q_packet(std::string data) {
+    std::string handler(const GdbCommand& command);
+    std::string handle_v_packet(const GdbCommand& command);
+    std::string handle_q_packet(const GdbCommand& command);
+    std::string handle_Q_packet(const GdbCommand& command) {
         return "E.Stub";
     }
 
-    void Run(const std::stop_token& stop) const;
+    void Run(const std::stop_token& stop);
 };
 
 } // namespace Core::Devtools

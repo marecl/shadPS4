@@ -69,21 +69,22 @@ GdbStub::GdbCommand GdbStub::ParsePacket(const std::string& data) {
     const std::string_view cmd_view = std::string_view(data).substr(1, end_pos - 1);
 
     GdbCommand command;
+    command.raw = data;
     command.cmd = std::string(cmd_view);
-    command.raw_data = data;
 
     if (std::isdigit(cmd_view[1])) {
         command.cmd = cmd_view.substr(0, 1);
-        return command;
     }
 
     if (std::isdigit(cmd_view[2])) { // e.g. "Hg12345"
         command.cmd = cmd_view.substr(0, 2);
-        return command;
     }
 
-    if (const size_t pos = cmd_view.find_first_of(":;-"); pos != std::string::npos) {
+    auto septoken = cmd_view.find_first_of(":;");
+    auto maybeNumber = cmd_view.find_first_of("-0123456789");
+    if (const size_t pos = std::min(septoken, maybeNumber); pos != std::string::npos) {
         command.cmd = cmd_view.substr(0, pos);
+        command.arg = cmd_view.substr(pos + (pos == septoken ? 1 : 0));
     }
 
     return command;
@@ -103,6 +104,7 @@ std::string GdbStub::MakeResponse(const std::string& response) {
 
 bool GdbStub::HandleIncomingData(const int client) {
     char buf[1024];
+    memset(buf, 0, sizeof(buf));
     const ssize_t bytes = recv(client, buf, sizeof(buf), 0);
     if (bytes == -1 || bytes == 0) {
         return false;
@@ -128,7 +130,7 @@ bool GdbStub::HandleIncomingData(const int client) {
         data = data.substr(1);
     }
 
-    const std::string reply = MakeResponse(handler(data));
+    const std::string reply = MakeResponse(handler(ParsePacket(data)));
     if (reply.empty()) {
         return false;
     }
@@ -166,13 +168,10 @@ pid_t GetTid(const pthread_t ptid) {
 std::string BuildThreadList() {
     std::string buffer;
     buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
-
     for (auto& [name, id, id_enc] : Core::Devtools::GdbData::thread_list()) {
-        buffer += fmt::format(R"*(    <thread id="{:x}" name="{}" handle="{:x}"></thread>)*",
+        buffer += fmt::format(R"*(    <thread id="{:x}" name="{}" handle="{:x}"></thread>\n)*",
                               id_enc, name, id_enc);
-        buffer += '\n';
     }
-
     buffer += "</threads>";
     return buffer;
 }
@@ -184,20 +183,26 @@ static ThreadID selectedThread = 0;
 static ucontext_t selectedCtx = wwe[selectedThread];
 static bool vMustReplyEmpty = false; // Empty string on unknown command
 
-std::string GdbStub::handler(const std::string& data) {
-    LOG_INFO(Debug, "GDB Received: {}", data);
-    char category = data[0];
+std::string NIMPL(std::string c) {
+    LOG_WARNING(Debug, "Not implemented: {}", c);
+    return std::format("E.Not implemented: {}", c);
+}
 
-    // ignore format at first lol
-    const std::string remainder = data.substr(1, data.find_first_of('#'));
+std::string GdbStub::handler(const GdbCommand& command) {
+    LOG_INFO(Debug, "Received data:\n\tRAW: {}\n\tCMD: {}\n\tARG: {}", command.raw, command.cmd,
+             command.arg);
+
+    char category = command.cmd[0];
 
     switch (category) {
     default:
         break;
     case '!':
         return OK;
+    case '?': // redo
+        return "S05";
 
-    case 'H': // handle threads
+    case 'H': // handle threads, -1 all, 0 any
         break;
         // these apply to threads too
         // the problem is, that gdb expects the main thread to be active
@@ -221,12 +226,12 @@ std::string GdbStub::handler(const std::string& data) {
 
         // advanced
     case 'v': // Special, multiletter, until first ; OR until first ? OR until EOS
-        return handle_v_packet(remainder);
+        return handle_v_packet(command);
 
     case 'q':
-        return handle_q_packet(remainder);
+        return handle_q_packet(command);
     case 'Q':
-        return handle_Q_packet(remainder);
+        return handle_Q_packet(command);
 
     case 'r':
     case 'R':
@@ -237,76 +242,50 @@ std::string GdbStub::handler(const std::string& data) {
     case 'Z': // remove breakpoint
         break;
     }
-    return "E.Stub";
+    return NIMPL(command.cmd);
 }
 
-std::string GdbStub::handle_v_packet(const std::string data) {
-    auto semicolonPos = data.find_first_of(';');
-    auto questionPos = data.find_first_of('?');
-
-    std::string command;
-    std::string args = "";
-
-    if (questionPos == semicolonPos == std::string::npos)
-        command = data;
-    else {
-        auto endPos = semicolonPos > questionPos ? questionPos : semicolonPos;
-        command = data.substr(0, endPos);
-        args = data.substr(endPos);
-    }
-
-    if (command == "Cont?") {
+std::string GdbStub::handle_v_packet(const GdbCommand& command) {
+    if (command.cmd == "vCont?") {
+        LOG_WARNING(Debug, "vCont? probably stubbed");
+        return "vCont;s;c;t";
         // supported commands for vCont
         // vCont[;action;...]
     }
-    if (command == "Cont;") {
+    if (command.cmd == "vCont") {
+        LOG_WARNING(Debug, "qAttach probably stubbed");
+        return OK;
         // vCont[;action[:thread-id]]
         //  c C [sig] s S [sig] t r
     }
-    if (command == "MustReplyEmpty")
+    if (command.cmd == "vMustReplyEmpty")
         return "";
 
-    return std::format("E.Not implemented: {}", command);
+    return NIMPL(command.cmd);
 }
 
-std::string GdbStub::handle_q_packet(const std::string data) {
-    auto semicolonPos = data.find_first_of(';');
-    auto questionPos = data.find_first_of('?');
-
-    std::string command;
-    std::string args = "";
-
-    if (questionPos == semicolonPos == std::string::npos)
-        command = data;
-    else {
-        auto endPos = semicolonPos > questionPos ? questionPos : semicolonPos;
-        command = data.substr(0, endPos);
-        args = data.substr(endPos);
+std::string GdbStub::handle_q_packet(const GdbCommand& command) {
+    if (command.cmd == "qAttached") {
+        LOG_WARNING(Debug, "qAttach probably stubbed");
+        return "1";
     }
-
-    if (command == "Cont?") {
-        // supported commands for vCont
-        // vCont[;action;...]
-    }
-    if (command == "Cont;") {
-        // vCont[;action[:thread-id]]
-        //  c C [sig] s S [sig] t r
-    }
-    if (command == "MustReplyEmpty")
-        return "";
-
-    if (command == "Xfer:features")
+    if (command.cmd == "qXfer:features")
         return target_description;
-    if (command == "Xfer:threads")
+    if (command.cmd == "qXfer:threads")
         return BuildThreadList();
-    if (command == "fThreadInfo") {
+    if (command.cmd == "qfThreadInfo") {
         // send MAIN THREAD!!! m thread-id
     }
-    if (command == "qsThreadInfo") {
+    if (command.cmd == "qsThreadInfo") {
         // send remaining threads! m tid,tid.. l (male l - koniec listy)
     }
+    if (command.cmd == "qSupported") {
+        LOG_WARNING(Debug, "qSupported probably stubbed");
+        // save what's supported by the remote
+        return "PacketSize=1024;qXfer:features:read+;qXfer:threads:read+;binary-upload+";
+    }
 
-    return std::format("E.Not implemented: {}", command);
+    return NIMPL(command.cmd);
 }
 
 /*
@@ -431,7 +410,7 @@ std::string GdbStub::ReadRegisterAsString(const Register reg) {
     return formatted;
 }
 
-void GdbStub::Run(const std::stop_token& stop) const {
+void GdbStub::Run(const std::stop_token& stop) {
     LOG_INFO(Debug, "GDB stub listening on port {}", m_port);
 
     if (listen(m_socket, 1) == -1) {

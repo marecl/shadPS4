@@ -26,6 +26,7 @@ using namespace ::Libraries::Kernel;
 
 namespace Data {
 
+std::mutex guest_threads_mutex{};
 static std::unordered_map<u64, u32> thread_list_name_pthr;
 
 // loadables
@@ -40,6 +41,7 @@ using namespace ::Libraries::Kernel;
 DebugStateImpl& DebugState = *Common::Singleton<DebugStateImpl>::Instance();
 
 bool thread_register(u64 tid) {
+    std::lock_guard lock{Data::guest_threads_mutex};
     try {
         const u32 id_encoded = 1 + ((~tid) & 0x7FFFFFFF);
         Data::thread_list_name_pthr[tid] = id_encoded;
@@ -56,6 +58,7 @@ bool thread_register(u64 tid) {
 }
 
 bool thread_unregister(u64 tid) {
+    std::lock_guard lock{Data::guest_threads_mutex};
     try {
         Data::thread_list_name_pthr.erase(tid);
 
@@ -131,6 +134,8 @@ void loadable_register(u64 base_addr, u64 size, std::string name) {
     return;
 }
 
-void loadable_unregister();
+void loadable_unregister() {
+    LOG_WARNING(Debug, "If you see this we're fucked (this function is never called)");
+}
 
 } // namespace Core::Devtools::GdbData
