@@ -6,6 +6,7 @@
 #include "common/assert.h"
 #include "common/native_clock.h"
 #include "common/singleton.h"
+#include "core/devtools/gdb/gdb_data.h"
 #include "debug_state.h"
 #include "devtools/widget/common.h"
 #include "libraries/kernel/time.h"
@@ -14,6 +15,7 @@
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 
 using namespace DebugStateType;
+using namespace Core::Devtools;
 
 DebugStateImpl& DebugState = *Common::Singleton<DebugStateImpl>::Instance();
 
@@ -28,118 +30,38 @@ static ThreadID ThisThreadID() {
 }
 
 static void PauseThread(ThreadID id) {
-#ifdef _WIN32
-    auto handle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, id);
-    SuspendThread(handle);
-    CloseHandle(handle);
-#else
-    pthread_kill(id, SIGUSR1);
-#endif
+    GdbData::thread_pause(id);
 }
 
 static void ResumeThread(ThreadID id) {
-#ifdef _WIN32
-    auto handle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, id);
-    ResumeThread(handle);
-    CloseHandle(handle);
-#else
-    pthread_kill(id, SIGUSR1);
-#endif
+    // Check returns
+    GdbData::thread_resume(id);
 }
 
 void DebugStateImpl::AddCurrentThreadToGuestList() {
-    std::lock_guard lock{guest_threads_mutex};
-    const ThreadID id = ThisThreadID();
-    guest_threads.push_back(id);
+    GdbData::thread_register(ThisThreadID());
 }
 
 void DebugStateImpl::RemoveCurrentThreadFromGuestList() {
-    std::lock_guard lock{guest_threads_mutex};
-    const ThreadID id = ThisThreadID();
-    std::erase_if(guest_threads, [&](const ThreadID& v) { return v == id; });
-}
-
-std::unordered_map<ThreadID, ucontext_t> captured_contexts;
-std::unordered_map<ThreadID, std::condition_variable> cond_vars;
-std::unordered_map<ThreadID, std::mutex> cond_mutexes;
-std::unordered_map<ThreadID, std::atomic<bool>> ready_flags;
-
-static void capture_context_handler(int sig, siginfo_t* si, void* ucontext) {
-    ThreadID this_id = pthread_self();
-
-    std::unique_lock<std::mutex> lock(cond_mutexes[this_id]);
-    std::memcpy(&captured_contexts[this_id], ucontext, sizeof(ucontext_t));
-    ready_flags[this_id] = true;
-    cond_vars[this_id].notify_one();
+    GdbData::thread_unregister(ThisThreadID());
 }
 
 void DebugStateImpl::PauseGuestThreads() {
-    struct sigaction sa = {0};
-    sa.sa_flags = SA_SIGINFO;
-    sa.sa_sigaction = capture_context_handler;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGUSR1, &sa, NULL);
+    pause_time = Libraries::Kernel::Dev::GetClock()->GetUptime();
 
-    captured_contexts.clear();
-
-    using namespace Libraries::MsgDialog;
-    std::unique_lock lock{guest_threads_mutex};
-    if (is_guest_threads_paused) {
-        return;
-    }
     if (ShouldPauseInSubmit()) {
         waiting_submit_pause = false;
         should_show_frame_dump = true;
     }
-    bool self_guest = false;
-    ThreadID self_id = ThisThreadID();
 
-    for (const auto& id : guest_threads) {
-        if (id == self_id) {
-            self_guest = true;
-        } else {
-            PauseThread(id);
-            std::unique_lock<std::mutex> lock(cond_mutexes[id]);
-            cond_vars[id].wait(lock, [&] { return ready_flags[id].load(); });
-        }
-    }
-
-    pause_time = Libraries::Kernel::Dev::GetClock()->GetUptime();
-    is_guest_threads_paused = true;
-    lock.unlock();
-
-    if (self_guest) {
-        PauseThread(self_id);
-    }
-
-    cctx = captured_contexts;
-    for (auto& [id, ctx] : captured_contexts) {
-        std::string out = "";
-        u8 bfr[32];
-        memcpy(bfr, ctx.uc_stack.ss_sp - 32, 32);
-
-        for (u8 i = 0; i < 32; i++)
-            out += std::format("{:02x} ", bfr[i]);
-        /*LOG_INFO(Debug, "{:x} -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: {:x}",
-                 reinterpret_cast<u64>(id), ctx.uc_mcontext.gregs[REG_RIP],
-                 ctx.uc_mcontext.gregs[REG_RDI], ctx.uc_mcontext.gregs[REG_RSI],
-                 ctx.uc_mcontext.gregs[REG_RBP], ctx.uc_mcontext.gregs[REG_RBX]);
-        LOG_INFO(Debug, "\t->Stack Dump: {}", out);*/
-    }
+    GdbData::thread_pause_all(ThisThreadID(), is_guest_threads_paused);
 }
 
 void DebugStateImpl::ResumeGuestThreads() {
-    std::lock_guard lock{guest_threads_mutex};
-    if (!is_guest_threads_paused) {
-        return;
-    }
+    GdbData::thread_resume_all(is_guest_threads_paused);
 
     u64 delta_time = Libraries::Kernel::Dev::GetClock()->GetUptime() - pause_time;
     Libraries::Kernel::Dev::GetInitialPtc() += delta_time;
-    for (const auto& id : guest_threads) {
-        ResumeThread(id);
-    }
-    is_guest_threads_paused = false;
 }
 
 void DebugStateImpl::RequestFrameDump(s32 count) {

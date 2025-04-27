@@ -28,13 +28,20 @@ using namespace ::Libraries::Kernel;
  * and made into a positive number.
  */
 
-bool thread_register(u64 pid);
+#define GAME_MAIN_THREAD_NAME (const char*)"GAME_MainThread"
 
-bool thread_unregister(u64 pid);
+void gdbdata_initialize();
 
-u64 thread_decode_id(u32 id);
-// void -> thread name, thread ID, short thread ID
-std::vector<std::tuple<std::string, u64, u32>> thread_list(void);
+bool thread_register(ThreadID pid);
+bool thread_unregister(ThreadID pid);
+
+bool thread_pause(ThreadID pid);
+bool thread_resume(ThreadID pid);
+
+bool thread_pause_all(ThreadID dont_pause_me_bro_or_sth_i_dunno_lol, bool is_guest_threads_paused);
+bool thread_resume_all(bool is_guest_threads_paused);
+
+ThreadID thread_decode_id(u32 encID);
 
 /****** LOADED BINARIES ******/
 /*
@@ -42,5 +49,9 @@ std::vector<std::tuple<std::string, u64, u32>> thread_list(void);
  */
 void loadable_register(u64 base_addr, u64 size, std::string name);
 void loadable_unregister();
+
+static void capture_context_handler(int sig, siginfo_t* si, void* ucontext);
+
+// Why are the dogs peeing with one paw up?
 
 } // namespace Core::Devtools::GdbData

@@ -170,7 +170,7 @@ std::string BuildThreadList() {
     buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
     for (auto& [name, id, id_enc] : Core::Devtools::GdbData::thread_list()) {
         buffer += fmt::format(R"*(    <thread id="{:x}" name="{}" handle="{:x}"></thread>\n)*",
-                              id_enc, name, id_enc);
+                              id_enc, name, id);
     }
     buffer += "</threads>";
     return buffer;
@@ -244,6 +244,8 @@ std::string GdbStub::handler(const GdbCommand& command) {
     }
     return NIMPL(command.cmd);
 }
+
+// Because they would fall if they raised two
 
 std::string GdbStub::handle_v_packet(const GdbCommand& command) {
     if (command.cmd == "vCont?") {

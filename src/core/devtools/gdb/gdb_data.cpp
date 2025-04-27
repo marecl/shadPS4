@@ -26,12 +26,22 @@ using namespace ::Libraries::Kernel;
 
 namespace Data {
 
-std::mutex guest_threads_mutex{};
-static std::unordered_map<u64, u32> thread_list_name_pthr;
+typedef std::tuple<std::string, u32> thread_meta_t;
+typedef std::tuple<u64, u64, std::string> loadable_info_t;
+
+static std::mutex guest_threads_mutex{};
+static std::unordered_map<ThreadID, thread_meta_t> thread_list_name_pthr;
+static std::unordered_map<ThreadID, ucontext_t> captured_contexts;
+static std::unordered_map<ThreadID, std::condition_variable> cond_vars;
+static std::unordered_map<ThreadID, std::mutex> cond_mutexes;
+static std::unordered_map<ThreadID, std::atomic<bool>> ready_flags;
 
 // loadables
-typedef std::tuple<u64, u64, std::string> loadable_info_t;
-std::vector<loadable_info_t> loaded_binaries;
+static std::vector<loadable_info_t> loaded_binaries;
+
+// void -> thread name, thread ID, short thread ID
+static std::vector<thread_meta_t> thread_list(void);
+
 } // namespace Data
 
 namespace Core::Devtools::GdbData {
@@ -40,55 +50,154 @@ using namespace ::Libraries::Kernel;
 
 DebugStateImpl& DebugState = *Common::Singleton<DebugStateImpl>::Instance();
 
-bool thread_register(u64 tid) {
+void gdbdata_initialize() {
+    struct sigaction sa = {0};
+    sa.sa_flags = SA_SIGINFO;
+    sa.sa_sigaction = capture_context_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGUSR1, &sa, NULL);
+}
+
+bool thread_register(ThreadID tid) {
+    /*
+        std::lock_guard lock{guest_threads_mutex};
+    const ThreadID id = ThisThreadID();
+    guest_threads.push_back(id);
+    */
+
     std::lock_guard lock{Data::guest_threads_mutex};
     try {
-        const u32 id_encoded = 1 + ((~tid) & 0x7FFFFFFF);
-        Data::thread_list_name_pthr[tid] = id_encoded;
+        const u32 tid_encoded = 1 + ((~tid) & 0x7FFFFFFF);
 
         char XD[128];
         pthread_getname_np(tid, XD, 256);
         std::string thrname = std::string(XD);
 
-        LOG_INFO(Debug, "Thread registered: {} ({:x} -> {:x})", thrname, tid, id_encoded);
+        Data::thread_meta_t newThread = Data::thread_meta_t(thrname, tid_encoded);
+        Data::thread_list_name_pthr[tid] = newThread;
+
+        LOG_INFO(Debug, "Thread registered: {} ({:x} -> {:x})", thrname, tid, tid_encoded);
         return true;
     } catch (...) {
     }
+    LOG_ERROR(Debug, "Failed to register thread: {:x}", tid);
     return false;
 }
 
-bool thread_unregister(u64 tid) {
+bool thread_unregister(ThreadID tid) {
+    /*
+        std::lock_guard lock{guest_threads_mutex};
+    const ThreadID id = ThisThreadID();
+    std::erase_if(guest_threads, [&](const ThreadID& v) { return v == id; });
+    */
+
     std::lock_guard lock{Data::guest_threads_mutex};
     try {
+        Data::thread_meta_t toBeRemoved = Data::thread_list_name_pthr[tid];
         Data::thread_list_name_pthr.erase(tid);
 
-        char XD[128];
-        pthread_getname_np(tid, XD, 256);
-        std::string thrname = std::string(XD);
-
-        LOG_INFO(Debug, "Thread unregistered: {} ({:x})", thrname, tid);
+        LOG_INFO(Debug, "Thread unregistered: {} ({:x})", std::get<0>(toBeRemoved), tid);
         return true;
     } catch (...) {
     }
 
+    LOG_ERROR(Debug, "Failed to unregister thread: {:x}", tid);
     return false;
 }
 
-u64 thread_decode_id(u32 id) {
-    if (id == 0 || id == -1)
-        return 0;
+bool thread_pause(ThreadID pid) {
+// check if running
+#ifdef _WIN32
+    auto handle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, pid);
+    SuspendThread(handle);
+    CloseHandle(handle);
+#else
+    pthread_kill(pid, SIGUSR1);
+#endif
+}
+
+bool thread_resume(ThreadID pid) {
+// check if running
+#ifdef _WIN32
+    auto handle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, pid);
+    ResumeThread(handle);
+    CloseHandle(handle);
+#else
+    pthread_kill(pid, SIGUSR1);
+#endif
+}
+
+ThreadID thread_decode_id(u32 encID) {
+    if (encID == 0 || encID == -1)
+        return 0; // return MainThread here!!!
 
     try {
-        for (auto& [tid, encoded_id] : Data::thread_list_name_pthr) {
-            if (encoded_id == id) {
-                return tid;
+        for (const auto& meta : Data::thread_list_name_pthr) {
+            ThreadID maybeTargetThread = std::get<1>(meta);
+            if (maybeTargetThread== id) {
+                return maybeTargetThread;
             }
         }
     } catch (...) {
     }
-    LOG_ERROR(Debug, "Thread doesn't exist with this encoded ID: {:x}", id);
+    LOG_ERROR(Debug, "Thread doesn't exist with this encoded ID: {:x}", encID);
     return 0;
 }
+
+bool thread_resume_all(bool is_guest_threads_paused) {
+    std::lock_guard lock{Data::guest_threads_mutex};
+    if (!is_guest_threads_paused) {
+        return;
+    }
+
+    for (const auto& [id, _] : Data::thread_list_name_pthr) {
+        thread_resume(id);
+    }
+    is_guest_threads_paused = false;
+}
+
+bool thread_pause_all(ThreadID dont_pause_me_bro_or_sth_i_dunno_lol, bool is_guest_threads_paused) {
+
+    std::unique_lock lock{Data::guest_threads_mutex};
+    if (is_guest_threads_paused) {
+        return;
+    }
+
+    bool self_guest = false;
+
+    for (const auto& [id, _] : Data::thread_list_name_pthr) {
+        if (id == dont_pause_me_bro_or_sth_i_dunno_lol) {
+            self_guest = true;
+        } else {
+            thread_pause(id);
+            std::unique_lock<std::mutex> lock(Data::cond_mutexes[id]);
+            Data::cond_vars[id].wait(lock, [&] { return Data::ready_flags[id].load(); });
+        }
+    }
+
+    is_guest_threads_paused = true;
+    lock.unlock();
+
+    // pause debug state????
+    if (self_guest) {
+        thread_pause(dont_pause_me_bro_or_sth_i_dunno_lol);
+    }
+
+    for (auto& [id, ctx] : Data::captured_contexts) {
+        std::string out = "";
+        u8 bfr[32];
+        memcpy(bfr, ctx.uc_stack.ss_sp - 32, 32);
+
+        for (u8 i = 0; i < 32; i++)
+            out += std::format("{:02x} ", bfr[i]);
+        /*LOG_INFO(Debug, "{:x} -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: {:x}",
+                 reinterpret_cast<u64>(id), ctx.uc_mcontext.gregs[REG_RIP],
+                 ctx.uc_mcontext.gregs[REG_RDI], ctx.uc_mcontext.gregs[REG_RSI],
+                 ctx.uc_mcontext.gregs[REG_RBP], ctx.uc_mcontext.gregs[REG_RBX]);
+        LOG_INFO(Debug, "\t->Stack Dump: {}", out);*/
+    }
+}
+
 #include <pthread.h>
 /*
 
@@ -136,6 +245,15 @@ void loadable_register(u64 base_addr, u64 size, std::string name) {
 
 void loadable_unregister() {
     LOG_WARNING(Debug, "If you see this we're fucked (this function is never called)");
+}
+
+static void capture_context_handler(int sig, siginfo_t* si, void* ucontext) {
+    ThreadID this_id = pthread_self();
+
+    std::unique_lock<std::mutex> lock(Data::cond_mutexes[this_id]);
+    std::memcpy(&Data::captured_contexts[this_id], ucontext, sizeof(ucontext_t));
+    Data::ready_flags[this_id] = true;
+    Data::cond_vars[this_id].notify_one();
 }
 
 } // namespace Core::Devtools::GdbData
