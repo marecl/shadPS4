@@ -26,6 +26,7 @@ using namespace ::Core::Devtools;
 using L = ::Core::Devtools::Layer;
 
 static bool show_simple_fps = false;
+static bool visibility_toggled = false;
 
 static float fps_scale = 1.0f;
 static int dump_frame_count = 1;
@@ -116,24 +117,6 @@ void L::DrawMenuBar() {
         }
 
         EndMainMenuBar();
-    }
-
-    if (IsKeyPressed(ImGuiKey_F9, false)) {
-        if (io.KeyCtrl && io.KeyAlt) {
-            if (!DebugState.ShouldPauseInSubmit()) {
-                DebugState.RequestFrameDump(dump_frame_count);
-                SDL_Log("Frame dump requested");
-            }
-        }
-        if (!io.KeyCtrl && !io.KeyAlt) {
-            if (isSystemPaused) {
-                DebugState.ResumeGuestThreads();
-                SDL_Log("Game resumed from Keyboard");
-            } else {
-                DebugState.PauseGuestThreads();
-                SDL_Log("Game paused from Keyboard");
-            }
-        }
     }
 
     if (open_popup_options) {
@@ -384,13 +367,41 @@ void L::Draw() {
         }
     }
 
+    if (IsKeyPressed(ImGuiKey_F9, false)) {
+        if (io.KeyCtrl && io.KeyAlt) {
+            if (!DebugState.ShouldPauseInSubmit()) {
+                DebugState.RequestFrameDump(dump_frame_count);
+                SDL_Log("Frame dump requested");
+            }
+        }
+        if (!io.KeyCtrl && !io.KeyAlt) {
+            if (isSystemPaused) {
+                DebugState.ResumeGuestThreads();
+                SDL_Log("Game resumed from Keyboard");
+            } else {
+                DebugState.PauseGuestThreads();
+                SDL_Log("Game paused from Keyboard");
+            }
+        }
+    }
+
+    if (show_pause_status) {
+        ImVec2 pos = ImVec2(10, 10);
+        ImU32 color = IM_COL32(255, 255, 255, 255);
+
+        ImGui::GetForegroundDrawList()->AddText(pos, color, "Game Paused Press F9 to Resume");
+    }
+
     if (show_simple_fps) {
         if (Begin("Video Info", nullptr,
                   ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDecoration |
                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking)) {
 
             // Set window position to top left if it was toggled on
-            SetWindowPos("Video Info", {999999.0f, 0.0f}, ImGuiCond_Always);
+            if (visibility_toggled) {
+                SetWindowPos("Video Info", {999999.0f, 0.0f}, ImGuiCond_Always);
+                visibility_toggled = false;
+            }
 
             if (BeginPopupContextWindow()) {
 #define M(label, value)                                                                            \

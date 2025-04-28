@@ -271,7 +271,6 @@ private:
     Vulkan::Rasterizer* rasterizer{};
 
     friend class ::Core::Devtools::Widget::MemoryMapViewer;
-    //friend class ::Core::Devtools::GdbStub;
 };
 
 using Memory = Common::Singleton<MemoryManager>;

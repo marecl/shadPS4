@@ -208,9 +208,9 @@ static void RunThread(void* arg) {
     /* Start tracking thread */
     DebugState.AddCurrentThreadToGuestList();
 
+    /* Run the current thread's start routine with argument: */
     curthread->native_thr.Initialize();
 
-    /* Run the current thread's start routine with argument: */
     void* ret = Core::ExecuteGuest(curthread->start_routine, curthread->arg);
 
     /* Remove thread from tracking */

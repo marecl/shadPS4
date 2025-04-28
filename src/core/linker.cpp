@@ -336,10 +336,9 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
         return_info->virtual_address = AeroLib::GetStub(sr.name.c_str());
         return_info->name = "Unknown !!!";
     }
-    
-    // Why was it even on, or was it me
-    //LOG_ERROR(Core_Linker, "Linker: Stub resolved {} as {} (lib: {}, mod: {})", sr.name,
-    //          return_info->name, library->name, module->name);
+
+    LOG_ERROR(Core_Linker, "Linker: Stub resolved {} as {} (lib: {}, mod: {})", sr.name,
+              return_info->name, library->name, module->name);
     return false;
 }
 
