@@ -26,28 +26,41 @@ using namespace GdbDataType;
 GdbDataImpl& GdbData = *Common::Singleton<GdbDataImpl>::Instance();
 
 std::mutex GdbDataImpl::guest_threads_mutex;
-std::unordered_map<ThreadID, thread_meta_t> GdbDataImpl::thread_list_name_pthr;
+std::vector<thread_meta_t> GdbDataImpl::thread_list_name_pthr;
 std::unordered_map<ThreadID, ucontext_t> GdbDataImpl::captured_contexts;
 std::unordered_map<ThreadID, std::condition_variable> GdbDataImpl::cond_vars;
 std::unordered_map<ThreadID, std::mutex> GdbDataImpl::cond_mutexes;
 std::unordered_map<ThreadID, std::atomic<bool>> GdbDataImpl::ready_flags;
 std::vector<loadable_info_t> GdbDataImpl::loaded_binaries;
 
-GdbDataImpl::GdbDataImpl(void) {
-    // backup those???
-    struct sigaction sa = {0};
-    sa.sa_flags = SA_SIGINFO;
-    sa.sa_sigaction = capture_context_handler;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGUSR1, &sa, NULL);
+void ctx_dump_handler(int sig, siginfo_t* si, void* ucontext) {
+
+    ThreadID this_id = pthread_self();
+    LOG_ERROR(Debug, "CTX handler reached: {:x}",this_id);
+
+    std::unique_lock<std::mutex> lock(GdbDataImpl::cond_mutexes[this_id]);
+    std::memcpy(&GdbDataImpl::captured_contexts[this_id], ucontext, sizeof(ucontext_t));
+    GdbDataImpl::ready_flags[this_id] = true;
+    GdbDataImpl::cond_vars[this_id].notify_one();
+
+    for (auto& [id, ctx] : GdbDataImpl::captured_contexts) {
+        std::string out = "";
+        u8 bfr[32];
+        memcpy(bfr, reinterpret_cast<u8*>(ctx.uc_stack.ss_sp) - 32, 32);
+
+        for (u8 i = 0; i < 32; i++)
+            out += std::format("{:02x} ", bfr[i]);
+        LOG_INFO(Debug, "{:x} -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: {:x}",
+                 reinterpret_cast<u64>(id), ctx.uc_mcontext.gregs[REG_RIP],
+                 ctx.uc_mcontext.gregs[REG_RDI], ctx.uc_mcontext.gregs[REG_RSI],
+                 ctx.uc_mcontext.gregs[REG_RBP], ctx.uc_mcontext.gregs[REG_RBX]);
+        LOG_INFO(Debug, "\t->Stack Dump: {}", out);
+    }
+
+    return;
 }
 
 bool GdbDataImpl::thread_register(ThreadID tid) {
-    /*
-        std::lock_guard lock{guest_threads_mutex};
-    const ThreadID id = ThisThreadID();
-    guest_threads.push_back(id);
-    */
 
     std::lock_guard lock{GdbDataImpl::guest_threads_mutex};
     try {
@@ -57,8 +70,7 @@ bool GdbDataImpl::thread_register(ThreadID tid) {
         pthread_getname_np(tid, XD, 256);
         std::string thrname = std::string(XD);
 
-        thread_meta_t newThread = thread_meta_t(thrname, tid_encoded);
-        GdbDataImpl::thread_list_name_pthr[tid] = newThread;
+        GdbDataImpl::thread_list_name_pthr.push_back(thread_meta_t(tid, thrname, tid_encoded));
 
         LOG_INFO(Debug, "Thread registered: {} ({:x} -> {:x})", thrname, tid, tid_encoded);
         return true;
@@ -69,18 +81,13 @@ bool GdbDataImpl::thread_register(ThreadID tid) {
 }
 
 bool GdbDataImpl::thread_unregister(ThreadID tid) {
-    /*
-        std::lock_guard lock{guest_threads_mutex};
-    const ThreadID id = ThisThreadID();
-    std::erase_if(guest_threads, [&](const ThreadID& v) { return v == id; });
-    */
 
     std::lock_guard lock{guest_threads_mutex};
     try {
-        thread_meta_t toBeRemoved = GdbDataImpl::thread_list_name_pthr[tid];
-        GdbDataImpl::thread_list_name_pthr.erase(tid);
 
-        LOG_INFO(Debug, "Thread unregistered: {} ({:x})", std::get<0>(toBeRemoved), tid);
+        std::erase_if(thread_list_name_pthr, [&](const auto& v) { return std::get<0>(v) == tid; });
+
+        // LOG_INFO(Debug, "Thread unregistered: {} ({:x})", std::get<0>(toBeRemoved), tid);
         return true;
     } catch (...) {
     }
@@ -118,10 +125,10 @@ ThreadID GdbDataImpl::thread_decode_id(u32 encID) {
         return 0; // return MainThread here!!!
 
     try {
-        for (const auto& [id, meta] : thread_list_name_pthr) {
-            ThreadID maybeTargetThread = std::get<1>(meta);
+        for (const auto& thread : thread_list_name_pthr) {
+            ThreadID maybeTargetThread = std::get<2>(thread);
             if (maybeTargetThread == encID) {
-                return maybeTargetThread;
+                return std::get<0>(thread);
             }
         }
     } catch (...) {
@@ -132,14 +139,18 @@ ThreadID GdbDataImpl::thread_decode_id(u32 encID) {
 
 bool GdbDataImpl::thread_resume_all(std::atomic<bool>* is_guest_threads_paused) {
     std::lock_guard lock{GdbDataImpl::guest_threads_mutex};
-    if (!*is_guest_threads_paused) {
+    if (!is_guest_threads_paused->load()) {
         return false;
     }
 
-    for (const auto& [id, _] : GdbDataImpl::thread_list_name_pthr) {
-        thread_resume(id);
+    for (const auto& thread : thread_list_name_pthr) {
+        auto id = std::get<0>(thread);
+        auto name = std::get<1>(thread);
+        LOG_WARNING(Debug, "Resuming thread: {} ({:x})", name, id);
+        thread_resume(std::get<0>(thread));
     }
-    *is_guest_threads_paused = false;
+
+    is_guest_threads_paused->store(false);
     return true;
 }
 
@@ -147,24 +158,27 @@ bool GdbDataImpl::thread_pause_all(ThreadID dont_pause_me_bro_or_sth_i_dunno_lol
                                    std::atomic<bool>* is_guest_threads_paused) {
 
     std::unique_lock lock{guest_threads_mutex};
-    if (*is_guest_threads_paused) {
+    if (is_guest_threads_paused->load()) {
         return false;
     }
 
     bool self_guest = false;
 
-    for (const auto& [id, _] : GdbDataImpl::thread_list_name_pthr) {
-        if (id == dont_pause_me_bro_or_sth_i_dunno_lol) {
+    for (const auto& thread : thread_list_name_pthr) {
+        auto tid = std::get<0>(thread);
+        auto name = std::get<1>(thread);
+        if (tid == dont_pause_me_bro_or_sth_i_dunno_lol) {
             self_guest = true;
         } else {
-            thread_pause(id);
-            std::unique_lock<std::mutex> lock(cond_mutexes[id]);
-            GdbDataImpl::cond_vars[id].wait(lock,
-                                            [&] { return GdbDataImpl::ready_flags[id].load(); });
+            LOG_WARNING(Debug, "Pausing thread: {} ({:x})", name, tid);
+            thread_pause(tid);
+            // std::unique_lock<std::mutex> lock(cond_mutexes[id]);
+            // GdbDataImpl::cond_vars[id].wait(lock,
+            //                                [&] { return GdbDataImpl::ready_flags[id].load(); });
         }
     }
 
-    *is_guest_threads_paused = true;
+    is_guest_threads_paused->store(true);
     lock.unlock();
 
     // pause debug state????
@@ -172,19 +186,6 @@ bool GdbDataImpl::thread_pause_all(ThreadID dont_pause_me_bro_or_sth_i_dunno_lol
         thread_pause(dont_pause_me_bro_or_sth_i_dunno_lol);
     }
 
-    for (auto& [id, ctx] : captured_contexts) {
-        std::string out = "";
-        u8 bfr[32];
-        memcpy(bfr, reinterpret_cast<u8*>(ctx.uc_stack.ss_sp) - 32, 32);
-
-        for (u8 i = 0; i < 32; i++)
-            out += std::format("{:02x} ", bfr[i]);
-        LOG_INFO(Debug, "{:x} -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: {:x}",
-                 reinterpret_cast<u64>(id), ctx.uc_mcontext.gregs[REG_RIP],
-                 ctx.uc_mcontext.gregs[REG_RDI], ctx.uc_mcontext.gregs[REG_RSI],
-                 ctx.uc_mcontext.gregs[REG_RBP], ctx.uc_mcontext.gregs[REG_RBX]);
-        LOG_INFO(Debug, "\t->Stack Dump: {}", out);
-    }
     return true;
 }
 
@@ -198,16 +199,16 @@ corresponding host memory mappings.
 
 */
 // Name, original ID, short/encoded ID
-std::vector<thread_list_entry_t> GdbDataImpl::thread_list(void) {
+/*std::vector<thread_list_entry_t> GdbDataImpl::thread_list(void) {
     std::vector<std::tuple<std::string, u64, u32>> out;
 
-    for (auto& [pid, meta] : thread_list_name_pthr) {
+    for (auto& meta : thread_list_name_pthr) {
 
-        out.emplace_back(std::get<0>(meta), pid, std::get<1>(meta));
+        out.emplace_back(std::get<1>(meta), pid, std::get<1>(meta));
     }
 
     return out;
-}
+}*/
 
 void GdbDataImpl::loadable_register(u64 base_addr, u64 size, std::string name) {
     loadable_info_t entry(base_addr, size, name);
