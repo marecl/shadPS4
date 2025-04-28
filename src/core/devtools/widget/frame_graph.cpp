@@ -81,9 +81,7 @@ void FrameGraph::Draw() {
         const auto& window = *ctx.CurrentWindow;
         auto& draw_list = *window.DrawList;
 
-        auto isSystemPaused = DebugState.IsGuestThreadsPaused();
-
-        if (!isSystemPaused) {
+        if (!DebugState.IsGuestThreadsPaused()) {
             deltaTime = DebugState.FrameDeltaTime * 1000.0f;
             frameRate = 1000.0f / deltaTime;
         }

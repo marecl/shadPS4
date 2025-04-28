@@ -351,10 +351,10 @@ void L::Draw() {
     const auto io = GetIO();
     PushID("DevtoolsLayer");
 
-    //if (!DebugState.IsGuestThreadsPaused()) {
-    //    const auto fn = DebugState.flip_frame_count.load();
-    //    frame_graph.AddFrame(fn, DebugState.FrameDeltaTime);
-    //}
+    if (!DebugState.IsGuestThreadsPaused()) {
+        const auto fn = DebugState.flip_frame_count.load();
+        frame_graph.AddFrame(fn, DebugState.FrameDeltaTime);
+    }
 
     if (IsKeyPressed(ImGuiKey_F10, false)) {
         if (io.KeyCtrl) {
