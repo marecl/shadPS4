@@ -57,7 +57,7 @@ void L::DrawMenuBar() {
 
     if (BeginMainMenuBar()) {
         if (BeginMenu("Options")) {
-            if (MenuItemEx("Emulator Paused", nullptr, nullptr, isSystemPaused)) {
+            if (MenuItemEx("Pause Emulator", nullptr, nullptr, isSystemPaused)) {
                 if (isSystemPaused) {
                     DebugState.ResumeGuestThreads();
                 } else {
