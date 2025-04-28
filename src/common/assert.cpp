@@ -17,7 +17,7 @@ void assert_fail_impl() {
     Common::Log::Stop();
     std::fflush(stdout);
     Crash();
- }
+}
 
 [[noreturn]] void unreachable_impl() {
     Common::Log::Stop();
