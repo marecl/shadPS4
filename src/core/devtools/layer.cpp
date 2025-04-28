@@ -118,7 +118,6 @@ void L::DrawMenuBar() {
 
         EndMainMenuBar();
     }
-
     if (open_popup_options) {
         OpenPopup("GPU Tools Options");
         just_opened_options = true;
@@ -365,23 +364,25 @@ void L::Draw() {
         } else {
             show_simple_fps = !show_simple_fps;
         }
+        visibility_toggled = true;
     }
 
     if (IsKeyPressed(ImGuiKey_F9, false)) {
         if (io.KeyCtrl && io.KeyAlt) {
             if (!DebugState.ShouldPauseInSubmit()) {
                 DebugState.RequestFrameDump(dump_frame_count);
-                SDL_Log("Frame dump requested");
             }
-        }
-        if (!io.KeyCtrl && !io.KeyAlt) {
-            if (isSystemPaused) {
+        } else {
+            if (DebugState.IsGuestThreadsPaused()) {
                 DebugState.ResumeGuestThreads();
                 SDL_Log("Game resumed from Keyboard");
+                show_pause_status = false;
             } else {
                 DebugState.PauseGuestThreads();
                 SDL_Log("Game paused from Keyboard");
+                show_pause_status = true;
             }
+            visibility_toggled = true;
         }
     }
 
