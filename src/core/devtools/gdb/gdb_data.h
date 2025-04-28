@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <condition_variable>
+//#include <condition_variable>
 #include <thread>
 #include <atomic>
 #include <tuple>
@@ -30,7 +30,6 @@ struct Pthread;
 namespace GdbDataType {
 
 typedef std::tuple<ThreadID, std::string, u32> thread_meta_t;
-// typedef std::tuple<std::string, ThreadID, u32> thread_list_entry_t;
 typedef std::tuple<u64, u64, std::string> loadable_info_t;
 
 using namespace ::Libraries::Kernel;
@@ -87,11 +86,9 @@ public:
     // Thread ctx-s
     static std::unordered_map<ThreadID, ucontext_t> captured_contexts;
     // i forgot
-    static std::unordered_map<ThreadID, std::condition_variable> cond_vars;
     // mutex for ctx dump
     static std::unordered_map<ThreadID, std::mutex> cond_mutexes;
     // ctx dumped
-    static std::unordered_map<ThreadID, std::atomic<bool>> ready_flags;
 
     // loadables
     static std::vector<loadable_info_t> loaded_binaries;
