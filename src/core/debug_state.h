@@ -183,7 +183,7 @@ public:
     void ResumeGuestThreads();
 
     bool IsGuestThreadsPaused() const {
-        return is_guest_threads_paused;
+        return is_guest_threads_paused.load();
     }
 
     void IncFlipFrameNum() {

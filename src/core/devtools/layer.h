@@ -19,7 +19,6 @@ public:
     static void SetupSettings();
 
     void Draw() override;
-    bool show_pause_status = false;
 };
 
 } // namespace Core::Devtools
