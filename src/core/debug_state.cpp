@@ -47,10 +47,11 @@ void DebugStateImpl::PauseGuestThreads() {
 }
 
 void DebugStateImpl::ResumeGuestThreads() {
-    GdbData.thread_resume_all(&is_guest_threads_paused);
-
     u64 delta_time = Libraries::Kernel::Dev::GetClock()->GetUptime() - pause_time;
     Libraries::Kernel::Dev::GetInitialPtc() += delta_time;
+
+    GdbData.thread_resume_all(&is_guest_threads_paused);
+
 }
 
 void DebugStateImpl::RequestFrameDump(s32 count) {
