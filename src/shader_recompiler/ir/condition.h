@@ -38,6 +38,7 @@ constexpr std::string_view NameOf(Condition condition) {
     case Condition::Execnz:
         return "Execnz";
     }
+    return "Unknown";
 }
 
 } // namespace Shader::IR
