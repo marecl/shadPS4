@@ -32,7 +32,6 @@ static void PauseThread(ThreadID id) {
 }
 
 static void ResumeThread(ThreadID id) {
-    // Check returns
     GdbData.thread_resume(id);
 }
 

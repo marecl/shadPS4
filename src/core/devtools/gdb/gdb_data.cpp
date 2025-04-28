@@ -1,25 +1,13 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <unordered_map>
-#include <fmt/xchar.h>
-#include <magic_enum/magic_enum_utility.hpp>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <sys/mman.h>
-#include <sys/ptrace.h>
-#include <sys/socket.h>
-#include <sys/user.h>
-#include <sys/wait.h>
+#include "gdb_data.h"
 
-#include "common/assert.h"
-#include "common/debug.h"
+#include <unordered_map>
 #include "common/singleton.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/libs.h"
 #include "core/memory.h"
-#include "core/thread.h"
-#include "gdb_data.h"
 
 using namespace ::Libraries::Kernel;
 using namespace GdbDataType;
@@ -27,38 +15,7 @@ GdbDataImpl& GdbData = *Common::Singleton<GdbDataImpl>::Instance();
 
 std::mutex GdbDataImpl::guest_threads_mutex;
 std::vector<thread_meta_t> GdbDataImpl::thread_list_name_pthr;
-std::unordered_map<ThreadID, ucontext_t> GdbDataImpl::captured_contexts;
-std::unordered_map<ThreadID, std::condition_variable> GdbDataImpl::cond_vars;
-std::unordered_map<ThreadID, std::mutex> GdbDataImpl::cond_mutexes;
-std::unordered_map<ThreadID, std::atomic<bool>> GdbDataImpl::ready_flags;
 std::vector<loadable_info_t> GdbDataImpl::loaded_binaries;
-
-void ctx_dump_handler(int sig, siginfo_t* si, void* ucontext) {
-
-    ThreadID this_id = pthread_self();
-    LOG_ERROR(Debug, "CTX handler reached: {:x}",this_id);
-
-    std::unique_lock<std::mutex> lock(GdbDataImpl::cond_mutexes[this_id]);
-    std::memcpy(&GdbDataImpl::captured_contexts[this_id], ucontext, sizeof(ucontext_t));
-    GdbDataImpl::ready_flags[this_id] = true;
-    GdbDataImpl::cond_vars[this_id].notify_one();
-
-    for (auto& [id, ctx] : GdbDataImpl::captured_contexts) {
-        std::string out = "";
-        u8 bfr[32];
-        memcpy(bfr, reinterpret_cast<u8*>(ctx.uc_stack.ss_sp) - 32, 32);
-
-        for (u8 i = 0; i < 32; i++)
-            out += std::format("{:02x} ", bfr[i]);
-        LOG_INFO(Debug, "{:x} -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: {:x}",
-                 reinterpret_cast<u64>(id), ctx.uc_mcontext.gregs[REG_RIP],
-                 ctx.uc_mcontext.gregs[REG_RDI], ctx.uc_mcontext.gregs[REG_RSI],
-                 ctx.uc_mcontext.gregs[REG_RBP], ctx.uc_mcontext.gregs[REG_RBX]);
-        LOG_INFO(Debug, "\t->Stack Dump: {}", out);
-    }
-
-    return;
-}
 
 bool GdbDataImpl::thread_register(ThreadID tid) {
 
@@ -84,10 +41,9 @@ bool GdbDataImpl::thread_unregister(ThreadID tid) {
 
     std::lock_guard lock{guest_threads_mutex};
     try {
-
+        LOG_INFO(Debug, "Unregistering thread: {:x}", tid);
         std::erase_if(thread_list_name_pthr, [&](const auto& v) { return std::get<0>(v) == tid; });
 
-        // LOG_INFO(Debug, "Thread unregistered: {} ({:x})", std::get<0>(toBeRemoved), tid);
         return true;
     } catch (...) {
     }
@@ -147,7 +103,7 @@ bool GdbDataImpl::thread_resume_all(std::atomic<bool>* is_guest_threads_paused) 
         auto id = std::get<0>(thread);
         auto name = std::get<1>(thread);
         LOG_WARNING(Debug, "Resuming thread: {} ({:x})", name, id);
-        thread_resume(std::get<0>(thread));
+        thread_resume(id);
     }
 
     is_guest_threads_paused->store(false);
@@ -189,7 +145,6 @@ bool GdbDataImpl::thread_pause_all(ThreadID dont_pause_me_bro_or_sth_i_dunno_lol
     return true;
 }
 
-#include <pthread.h>
 /*
 
 Stephen — 23:28
@@ -236,11 +191,33 @@ void GdbDataImpl::loadable_unregister() {
     LOG_WARNING(Debug, "If you see this we're fucked (this function is never called)");
 }
 
-void GdbDataImpl::capture_context_handler(int sig, siginfo_t* si, void* ucontext) {
+std::unordered_map<ThreadID, ucontext_t> GdbDataImpl::captured_contexts;
+std::unordered_map<ThreadID, std::mutex> GdbDataImpl::cond_mutexes;
+
+void ctx_dump_handler(int sig, siginfo_t* si, void* ucontext) {
+
     ThreadID this_id = pthread_self();
+    // LOG_ERROR(Debug, "CTX handler reached: {:x}", this_id);
 
     std::unique_lock<std::mutex> lock(GdbDataImpl::cond_mutexes[this_id]);
     std::memcpy(&GdbDataImpl::captured_contexts[this_id], ucontext, sizeof(ucontext_t));
-    ready_flags[this_id] = true;
-    cond_vars[this_id].notify_one();
+
+    // can be removed, just to make sure we're not collecting garbage
+    // also to verify that ghidra gets correct information
+#define STACK_DUMP_SIZE 32
+    ucontext_t ctx = GdbDataImpl::captured_contexts[this_id];
+    std::string out = "";
+    u8 bfr[STACK_DUMP_SIZE];
+    memcpy(bfr, reinterpret_cast<u8*>(ctx.uc_stack.ss_sp) - STACK_DUMP_SIZE, STACK_DUMP_SIZE);
+
+    for (u8 i = 0; i < STACK_DUMP_SIZE; i++)
+        out += std::format("{:02x} ", bfr[i]);
+    LOG_INFO(
+        Debug,
+        "{:x} -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: {:x}\n\t->Stack Dump: {}",
+        reinterpret_cast<u64>(this_id), ctx.uc_mcontext.gregs[REG_RIP],
+        ctx.uc_mcontext.gregs[REG_RDI], ctx.uc_mcontext.gregs[REG_RSI],
+        ctx.uc_mcontext.gregs[REG_RBP], ctx.uc_mcontext.gregs[REG_RBX], out);
+
+    return;
 }
