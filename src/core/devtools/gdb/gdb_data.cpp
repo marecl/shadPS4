@@ -86,9 +86,9 @@ ThreadID GdbDataImpl::thread_decode_id(u32 encID) {
 void GdbDataImpl::thread_resume_all(std::atomic<bool>* is_guest_threads_paused) {
     std::lock_guard lock{GdbDataImpl::thread_list_mutex};
 
-    if (!is_guest_threads_paused->load()) {
-        return;
-    }
+    //if (!is_guest_threads_paused->load()) {
+    //    return;
+    //}
 
     for (const auto& thread : thread_list) {
         auto id = std::get<0>(thread);
@@ -96,7 +96,7 @@ void GdbDataImpl::thread_resume_all(std::atomic<bool>* is_guest_threads_paused) 
         thread_resume(id);
     }
 
-    is_guest_threads_paused->store(false);
+    //is_guest_threads_paused->store(false);
     return;
 }
 
@@ -126,7 +126,7 @@ void GdbDataImpl::thread_pause_all(ThreadID pause_me_last,
         thread_pause(pause_me_last);
     }
 
-    is_guest_threads_paused->store(true);
+    //is_guest_threads_paused->store(true);
 
     lock.unlock();
     return;
