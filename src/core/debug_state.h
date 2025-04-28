@@ -10,7 +10,9 @@
 #include <vector>
 #include <queue>
 
+#include "common/singleton.h"
 #include "common/types.h"
+#include "core/devtools/gdb/gdb_data.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 
 #ifdef _WIN32
@@ -22,7 +24,7 @@ using ThreadID = DWORD;
 #else
 #include <pthread.h>
 #include <signal.h>
-using ThreadID = pthread_t;
+// using ThreadID = pthread_t;
 #endif
 
 namespace Core::Devtools {
@@ -135,8 +137,6 @@ class DebugStateImpl {
 
     std::queue<std::string> debug_message_popup;
 
-    std::mutex guest_threads_mutex{};
-    std::vector<ThreadID> guest_threads{};
     std::atomic_bool is_guest_threads_paused = false;
     u64 pause_time{};
 
@@ -155,8 +155,6 @@ class DebugStateImpl {
     std::vector<ShaderDump> shader_dump_list{};
 
 public:
-std::unordered_map<ThreadID, ucontext_t> cctx;
-
     float Framerate = 1.0f / 60.0f;
     float FrameDeltaTime;
 

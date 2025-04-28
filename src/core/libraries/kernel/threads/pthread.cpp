@@ -4,13 +4,13 @@
 #include "common/assert.h"
 #include "common/thread.h"
 #include "core/debug_state.h"
+#include "core/devtools/gdb/gdb_data.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/libraries/kernel/threads/thread_state.h"
 #include "core/libraries/libs.h"
 #include "core/memory.h"
-#include "core/devtools/gdb/gdb_data.h"
 
 namespace Libraries::Kernel {
 
@@ -204,19 +204,18 @@ static void RunThread(void* arg) {
     Pthread* curthread = (Pthread*)arg;
     g_curthread = curthread;
     Common::SetCurrentThreadName(curthread->name.c_str());
+
+    /* Start tracking thread */
     DebugState.AddCurrentThreadToGuestList();
 
     curthread->native_thr.Initialize();
-    //Core::Devtools::GdbData::thread_register(curthread->native_thr.GetTid(),curthread->name.c_str());
-    Core::Devtools::GdbData::thread_register(curthread->native_thr.GetTid());
 
     /* Run the current thread's start routine with argument: */
     void* ret = Core::ExecuteGuest(curthread->start_routine, curthread->arg);
 
-    Core::Devtools::GdbData::thread_unregister(curthread->native_thr.GetTid());
-    
     /* Remove thread from tracking */
     DebugState.RemoveCurrentThreadFromGuestList();
+
     posix_pthread_exit(ret);
 }
 

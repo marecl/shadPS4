@@ -11,9 +11,9 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 
+#include <pthread.h>
 #include "common/assert.h"
 #include "common/debug.h"
-#include "core/debug_state.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/memory.h"
@@ -21,12 +21,10 @@
 #include "gdb_data.h"
 #include "gdb_stub.h"
 
-using namespace DebugStateType;
 using namespace ::Libraries::Kernel;
 
 namespace Core::Devtools {
 
-DebugStateImpl& DebugState = *Common::Singleton<DebugStateImpl>::Instance();
 
 constexpr auto OK = "OK";
 constexpr auto E01 = "E01";
@@ -168,20 +166,15 @@ pid_t GetTid(const pthread_t ptid) {
 std::string BuildThreadList() {
     std::string buffer;
     buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
-    for (auto& [name, id, id_enc] : Core::Devtools::GdbData::thread_list()) {
+    // TODO: implement thread_list again?????? why did it disappear
+    /*for (auto& [name, id, id_enc] : Core::Devtools::GdbData::thread_list()) {
         buffer += fmt::format(R"*(    <thread id="{:x}" name="{}" handle="{:x}"></thread>\n)*",
                               id_enc, name, id);
-    }
+    }*/
     buffer += "</threads>";
     return buffer;
 }
 
-#include <pthread.h>
-
-auto wwe = DebugState.cctx;
-static ThreadID selectedThread = 0;
-static ucontext_t selectedCtx = wwe[selectedThread];
-static bool vMustReplyEmpty = false; // Empty string on unknown command
 
 std::string NIMPL(std::string c) {
     LOG_WARNING(Debug, "Not implemented: {}", c);

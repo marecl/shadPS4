@@ -6,7 +6,6 @@
 #include "common/assert.h"
 #include "common/native_clock.h"
 #include "common/singleton.h"
-#include "core/devtools/gdb/gdb_data.h"
 #include "debug_state.h"
 #include "devtools/widget/common.h"
 #include "libraries/kernel/time.h"
@@ -15,7 +14,6 @@
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 
 using namespace DebugStateType;
-using namespace Core::Devtools;
 
 DebugStateImpl& DebugState = *Common::Singleton<DebugStateImpl>::Instance();
 
@@ -30,20 +28,20 @@ static ThreadID ThisThreadID() {
 }
 
 static void PauseThread(ThreadID id) {
-    GdbData::thread_pause(id);
+    GdbData.thread_pause(id);
 }
 
 static void ResumeThread(ThreadID id) {
     // Check returns
-    GdbData::thread_resume(id);
+    GdbData.thread_resume(id);
 }
 
 void DebugStateImpl::AddCurrentThreadToGuestList() {
-    GdbData::thread_register(ThisThreadID());
+    GdbData.thread_register(ThisThreadID());
 }
 
 void DebugStateImpl::RemoveCurrentThreadFromGuestList() {
-    GdbData::thread_unregister(ThisThreadID());
+    GdbData.thread_unregister(ThisThreadID());
 }
 
 void DebugStateImpl::PauseGuestThreads() {
@@ -54,11 +52,11 @@ void DebugStateImpl::PauseGuestThreads() {
         should_show_frame_dump = true;
     }
 
-    GdbData::thread_pause_all(ThisThreadID(), is_guest_threads_paused);
+    GdbData.thread_pause_all(ThisThreadID(), &is_guest_threads_paused);
 }
 
 void DebugStateImpl::ResumeGuestThreads() {
-    GdbData::thread_resume_all(is_guest_threads_paused);
+    GdbData.thread_resume_all(&is_guest_threads_paused);
 
     u64 delta_time = Libraries::Kernel::Dev::GetClock()->GetUptime() - pause_time;
     Libraries::Kernel::Dev::GetInitialPtc() += delta_time;
