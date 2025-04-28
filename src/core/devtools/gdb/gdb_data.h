@@ -5,6 +5,7 @@
 
 #include <condition_variable>
 #include <thread>
+#include <atomic>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -28,8 +29,8 @@ struct Pthread;
 
 namespace GdbDataType {
 
-typedef std::tuple<std::string, u32> thread_meta_t;
-typedef std::tuple<std::string, ThreadID, u32> thread_list_entry_t;
+typedef std::tuple<ThreadID, std::string, u32> thread_meta_t;
+// typedef std::tuple<std::string, ThreadID, u32> thread_list_entry_t;
 typedef std::tuple<u64, u64, std::string> loadable_info_t;
 
 using namespace ::Libraries::Kernel;
@@ -54,14 +55,10 @@ using namespace ::Libraries::Kernel;
 class GdbDataImpl {
 
 public:
-explicit GdbDataImpl(void);
-//~GdbDataImpl(void);
-
-
     bool thread_register(ThreadID pid);
     bool thread_unregister(ThreadID pid);
     // void -> thread name, thread ID, short thread ID
-    std::vector<thread_list_entry_t> thread_list(void);
+    // std::vector<thread_list_entry_t> thread_list(void);
 
     bool thread_pause(ThreadID pid);
     bool thread_resume(ThreadID pid);
@@ -85,7 +82,7 @@ explicit GdbDataImpl(void);
     //  main list mutex
     static std::mutex guest_threads_mutex;
     // thread list
-    static std::unordered_map<ThreadID, thread_meta_t> thread_list_name_pthr;
+    static std::vector<thread_meta_t> thread_list_name_pthr;
 
     // Thread ctx-s
     static std::unordered_map<ThreadID, ucontext_t> captured_contexts;
@@ -103,5 +100,5 @@ explicit GdbDataImpl(void);
 // Why are the dogs peeing with one paw up?
 
 } // namespace GdbDataType
-
+void ctx_dump_handler(int sig, siginfo_t* si, void* ucontext);
 extern GdbDataType::GdbDataImpl& GdbData;

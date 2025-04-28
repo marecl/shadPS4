@@ -7,6 +7,8 @@
 #include "common/signal_context.h"
 #include "core/signals.h"
 
+#include "core/devtools/gdb/gdb_data.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -94,6 +96,8 @@ static void SignalHandler(int sig, siginfo_t* info, void* raw_context) {
         }
         break;
     case SIGUSR1: { // Sleep thread until signal is received
+        ctx_dump_handler(sig, info, raw_context);
+
         sigset_t sigset;
         sigemptyset(&sigset);
         sigaddset(&sigset, SIGUSR1);
@@ -111,7 +115,7 @@ SignalDispatch::SignalDispatch() {
     ASSERT_MSG(handle = AddVectoredExceptionHandler(0, SignalHandler),
                "Failed to register exception handler.");
 #else
-    struct sigaction action{};
+    struct sigaction action{0};
     action.sa_sigaction = SignalHandler;
     action.sa_flags = SA_SIGINFO | SA_ONSTACK;
     sigemptyset(&action.sa_mask);
