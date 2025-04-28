@@ -69,6 +69,7 @@ public:
         case SymbolType::NoType:
             return "NoType";
         }
+        return "NoType";
     }
 
 private:
