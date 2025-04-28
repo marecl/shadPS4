@@ -27,14 +27,6 @@ static ThreadID ThisThreadID() {
 #endif
 }
 
-static void PauseThread(ThreadID id) {
-    GdbData.thread_pause(id);
-}
-
-static void ResumeThread(ThreadID id) {
-    GdbData.thread_resume(id);
-}
-
 void DebugStateImpl::AddCurrentThreadToGuestList() {
     GdbData.thread_register(ThisThreadID());
 }
@@ -51,7 +43,7 @@ void DebugStateImpl::PauseGuestThreads() {
         should_show_frame_dump = true;
     }
 
-    GdbData.thread_pause_all(ThisThreadID(), &is_guest_threads_paused);
+   GdbData.thread_pause_all(ThisThreadID(), &is_guest_threads_paused);
 }
 
 void DebugStateImpl::ResumeGuestThreads() {

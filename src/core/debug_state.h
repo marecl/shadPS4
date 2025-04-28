@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 #include <queue>
+#include <span>
 
 #include "common/singleton.h"
 #include "common/types.h"

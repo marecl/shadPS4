@@ -4,6 +4,7 @@
 #pragma once
 
 #include <thread>
+#include <ucontext.h>
 
 namespace Core::Devtools {
 
