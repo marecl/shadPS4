@@ -10,6 +10,7 @@
 
 using namespace ::Libraries::Kernel;
 using namespace GdbDataType;
+
 GdbDataImpl& GdbData = *Common::Singleton<GdbDataImpl>::Instance();
 
 std::mutex GdbDataImpl::thread_list_mutex;
@@ -19,7 +20,7 @@ std::vector<loadable_info_t> GdbDataImpl::loaded_binaries;
 std::unordered_map<ThreadID, ucontext_t> GdbDataImpl::ctx_dumps;
 std::unordered_map<ThreadID, std::mutex> GdbDataImpl::ctx_dump_mutex;
 
-static std::string getThreadName(ThreadID tid) {
+ std::string GdbDataImpl::getThreadName(ThreadID tid) {
     char _rawName[128];
     pthread_getname_np(tid, _rawName, 128);
     return std::string(_rawName);
@@ -68,18 +69,32 @@ void GdbDataImpl::thread_resume(ThreadID pid) {
     return;
 }
 
-ThreadID GdbDataImpl::thread_decode_id(u32 encID) {
-    if (encID == 0 || encID == -1)
-        return 0; // return MainThread here!!!
+thread_list_t GdbDataImpl::thread_get_list(void) {
+    thread_list_t out;
 
-    for (const auto& thread : thread_list) {
-        ThreadID maybeTargetThread = std::get<1>(thread);
-        if (maybeTargetThread == encID) {
+    for (auto& [tid, encid] : GdbDataImpl::thread_list) {
+        out.emplace_back(getThreadName(tid), tid, encid);
+    }
+    return out;
+}
+
+ThreadID GdbDataImpl::thread_decode_id(u32 encID) {
+    for (const thread_meta_t& thread : GdbDataImpl::thread_list) {
+        if (std::get<1>(thread) == encID) {
             return std::get<0>(thread);
         }
     }
 
-    LOG_ERROR(Debug, "Thread doesn't exist with this encoded ID: {:x}", encID);
+    LOG_ERROR(Debug, "Thread with this encoded ID: {:x} doesn't exist", encID);
+    return 0;
+}
+
+u32 GdbDataImpl::thread_encode_id(ThreadID tid) {
+    for (const thread_meta_t& thread : GdbDataImpl::thread_list) {
+        if (std::get<0>(thread) == tid)
+            return std::get<1>(thread);
+    }
+    LOG_ERROR(Debug, "Thread with this ID: {:x} doesn't exist ", tid);
     return 0;
 }
 
@@ -200,7 +215,7 @@ void ctx_dump_handler(int sig, siginfo_t* si, void* ucontext) {
     LOG_INFO(Debug,
              "{} ({:x}) -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: "
              "{:x}\n\t->Stack Dump: {}",
-             getThreadName(this_id), reinterpret_cast<u64>(this_id), ctx.uc_mcontext.gregs[REG_RIP],
+             GdbDataImpl::getThreadName(this_id), reinterpret_cast<u64>(this_id), ctx.uc_mcontext.gregs[REG_RIP],
              ctx.uc_mcontext.gregs[REG_RDI], ctx.uc_mcontext.gregs[REG_RSI],
              ctx.uc_mcontext.gregs[REG_RBP], ctx.uc_mcontext.gregs[REG_RBX], out);
 

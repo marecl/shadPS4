@@ -58,6 +58,7 @@ using namespace ::Libraries::Kernel;
 class GdbDataImpl {
 
 public:
+    /********** THREADS ***********/
     void thread_register(ThreadID pid);
     void thread_unregister(ThreadID pid);
     // void -> thread name, thread ID, short thread ID
@@ -72,7 +73,13 @@ public:
     static void thread_dump_ctx(ThreadID tid, void* ucontext);
     static ucontext_t thread_get_ctx(ThreadID tid);
 
+    static std::string getThreadName(ThreadID tid);
+    thread_list_t thread_get_list(void);
+
     ThreadID thread_decode_id(u32 encID);
+    u32 thread_encode_id(ThreadID tid);
+
+    /********** MEMORY ***********/
 
     /****** LOADED BINARIES ******/
     /*

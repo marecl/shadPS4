@@ -6,28 +6,23 @@
 #include <thread>
 #include <ucontext.h>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN 1
+#endif
+#include <Windows.h>
+using ThreadID = DWORD;
+#else
+#include <pthread.h>
+#include <signal.h>
+using ThreadID = pthread_t;
+#endif
+
 namespace Core::Devtools {
 
 class GdbStub {
-    enum class Register : int {
-        RAX = REG_RAX,
-        RBX = REG_RBX,
-        RCX = REG_RCX,
-        RDX = REG_RDX,
-        RSI = REG_RSI,
-        RDI = REG_RDI,
-        RBP = REG_RBP,
-        RSP = REG_RSP,
-        R8 = REG_R8,
-        R9 = REG_R9,
-        R10 = REG_R10,
-        R11 = REG_R11,
-        R12 = REG_R12,
-        R13 = REG_R13,
-        R14 = REG_R14,
-        R15 = REG_R15,
-        RIP = REG_RIP,
-    };
+
+
 
 public:
     explicit GdbStub(u16 port);
@@ -35,10 +30,6 @@ public:
     ~GdbStub();
 
 private:
-    u16 m_port;
-    int m_socket{};
-    std::jthread m_thread;
-
     // Taken from xenia
     enum class ControlCode : char {
         Ack = '+',
@@ -47,6 +38,12 @@ private:
         PacketEnd = '#',
         Interrupt = '\03',
     };
+
+    ThreadID selectedThread;
+
+    u16 m_port;
+    int m_socket{};
+    std::jthread m_thread;
 
     // Taken from xenia
     struct GdbCommand {
@@ -63,10 +60,11 @@ private:
     bool HandleIncomingData(const int client);
     static GdbStub::GdbCommand HandleCommand(const GdbCommand& command);
 
-    static std::string ReadRegisterAsString(Register reg);
+    static std::string dumpRegistersFromThread(ThreadID threadID);
     std::string MakeResponse(const std::string& response);
     std::string handler(const GdbCommand& command);
     std::string handle_v_packet(const GdbCommand& command);
+    std::string handle_H_packet(const GdbCommand& command);
     std::string handle_q_packet(const GdbCommand& command);
     std::string handle_Q_packet(const GdbCommand& command) {
         return "E.Stub";

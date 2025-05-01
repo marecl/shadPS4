@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <unordered_map>
 #include <fmt/xchar.h>
 #include <magic_enum/magic_enum_utility.hpp>
 #include <netinet/in.h>
@@ -14,6 +13,7 @@
 #include <pthread.h>
 #include "common/assert.h"
 #include "common/debug.h"
+#include "core/debug_state.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/memory.h"
@@ -25,9 +25,15 @@ using namespace ::Libraries::Kernel;
 
 namespace Core::Devtools {
 
-
 constexpr auto OK = "OK";
 constexpr auto E01 = "E01";
+
+static const std::vector<std::tuple<u8, std::string>> GPRegister = {
+    {REG_RAX, "RAX"}, {REG_RBX, "RBX"}, {REG_RCX, "RCX"},    {REG_RDX, "RDX"}, {REG_RSI, "RSI"},
+    {REG_RDI, "RDI"}, {REG_RBP, "RBP"}, {REG_RSP, "RSP"},    {REG_R8, "R8"},   {REG_R9, "R9"},
+    {REG_R10, "R10"}, {REG_R11, "R11"}, {REG_R12, "R12"},    {REG_R13, "R13"}, {REG_R14, "R14"},
+    {REG_R15, "R15"}, {REG_RIP, "RIP"}, {REG_EFL, "EFLAGS"},
+};
 
 constexpr char target_description[] = R"(l<?xml version="1.0"?>
 <!DOCTYPE target SYSTEM "gdb-target.dtd">
@@ -38,6 +44,8 @@ constexpr char target_description[] = R"(l<?xml version="1.0"?>
 GdbStub::GdbStub(const u16 port) : m_port(port), m_thread(&GdbStub::Run, this) {
     CreateSocket();
     m_thread.detach();
+
+    selectedThread = 0;
 }
 
 GdbStub::~GdbStub() {
@@ -164,17 +172,16 @@ pid_t GetTid(const pthread_t ptid) {
 
 // Modified from xenia a little bit
 std::string BuildThreadList() {
+    const GdbDataType::thread_list_t threads = GdbData.thread_get_list();
     std::string buffer;
     buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
-    // TODO: implement thread_list again?????? why did it disappear
-    /*for (auto& [name, id, id_enc] : Core::Devtools::GdbData::thread_list()) {
-        buffer += fmt::format(R"*(    <thread id="{:x}" name="{}" handle="{:x}"></thread>\n)*",
+    for (auto& [name, id, id_enc] : threads) {
+        buffer += fmt::format("    <thread id=\"{:x}\" name=\"{}\" handle=\"{:x}\"></thread>\n",
                               id_enc, name, id);
-    }*/
+    }
     buffer += "</threads>";
     return buffer;
 }
-
 
 std::string NIMPL(std::string c) {
     LOG_WARNING(Debug, "Not implemented: {}", c);
@@ -191,16 +198,32 @@ std::string GdbStub::handler(const GdbCommand& command) {
     default:
         break;
     case '!':
+        // No point of supporting that (change my mind)
+        return "E.Extended mode not supported";
+        // return OK;
+    case '?':
+        /*
+         * This is the very first packet to enable gdb stub (allegedly).
+         * Reply is the stop reason, so we force a known state,
+         * honestly quite characteristic for gdb - pause target.
+         * 1) we are 100% sure we're in a known state
+         * 2) paused threads dumped their contexts
+         * */
+        DebugState.PauseGuestThreads();
+        return "S0A";
+
+    case 'c':
+        if (DebugState.IsGuestThreadsPaused())
+            DebugState.ResumeGuestThreads();
         return OK;
-    case '?': // redo
-        return "S05";
 
     case 'H': // handle threads, -1 all, 0 any
-        break;
-        // these apply to threads too
-        // the problem is, that gdb expects the main thread to be active
-        // so i need to figure out how to address GAME_MainThread
+        return handle_H_packet(command);
+    // these apply to threads too
+    // the problem is, that gdb expects the main thread to be active
+    // so i need to figure out how to address GAME_MainThread
     case 'g':
+        return dumpRegistersFromThread(selectedThread);
         break; // read general registers
     case 'G':
         break; // write general registers
@@ -209,7 +232,11 @@ std::string GdbStub::handler(const GdbCommand& command) {
     case 'M': // M addr,length:XX write
         break;
     case 'p': // p m reg read
-        break;
+        if (std::stoi(command.arg, NULL, 16) >= 18)
+            return "0000000000000000";
+        return "0000000000000000";
+        // 3A - fs_base
+        // 3B - gs_base
     case 'P': // P n=x reg write
         break;
     case 'x': // same as m but binary
@@ -238,17 +265,86 @@ std::string GdbStub::handler(const GdbCommand& command) {
     return NIMPL(command.cmd);
 }
 
+ThreadID getThreadByName(std::string name) {
+    for (GdbDataType::thread_list_item_t& thr : GdbData.thread_get_list()) {
+        if (std::get<0>(thr) == name)
+            return std::get<1>(thr);
+    }
+    return 0;
+}
+
+ThreadID getThreadHandleFromString(const std::string& data) {
+    ThreadID out = std::strtoull(data.c_str(), NULL, 16);
+
+    return out;
+}
+
+std::string GdbStub::handle_H_packet(const GdbCommand& command) {
+    if (command.cmd.length() < 2)
+        return "E.CMDTooShort";
+
+    const char action = command.cmd[1];
+
+    switch (action) {
+    case 'c':
+        // could be as encoded
+        if (command.arg == "-1" || command.arg == "0") {
+            selectedThread = getThreadByName(GAME_MAIN_THREAD_NAME);
+            LOG_ERROR(Debug, "Main thread selected: {:x}", selectedThread);
+            return OK;
+        }
+        selectedThread = getThreadHandleFromString(command.arg);
+        LOG_ERROR(Debug, "Selected thread: {:x}", selectedThread);
+        return OK;
+    case 'g':
+        ThreadID target = 0;
+        if (command.arg == "0")
+            target = getThreadByName(GAME_MAIN_THREAD_NAME);
+        else if (command.arg == "-1")
+            target = selectedThread;
+        else
+            target = GdbData.thread_decode_id(std::stoi(command.arg, NULL, 16));
+        if (target == 0) {
+            LOG_ERROR(Debug, "Attempting to dump nonexistent thread: {:x}", target);
+            return "E.Thread doesn't exist";
+        }
+
+        if (DebugState.IsGuestThreadsPaused()) {
+            GdbData.thread_resume(target);
+            GdbData.thread_pause(target);
+        } else {
+            GdbData.thread_pause(target);
+        }
+        GdbData.thread_resume(target);
+        LOG_ERROR(Debug, "Dumping thread registers: {} ({:x})",GdbData.getThreadName(target), target);
+        return dumpRegistersFromThread(target);
+    }
+
+    return NIMPL(command.cmd);
+}
+
 // Because they would fall if they raised two
 
 std::string GdbStub::handle_v_packet(const GdbCommand& command) {
     if (command.cmd == "vCont?") {
-        LOG_WARNING(Debug, "vCont? probably stubbed");
+        // Currently supporting continue, step and stop
+        // Additional actions (sig, run to addr) must wait
         return "vCont;s;c;t";
-        // supported commands for vCont
-        // vCont[;action;...]
     }
     if (command.cmd == "vCont") {
-        LOG_WARNING(Debug, "qAttach probably stubbed");
+        char action = command.arg[0];
+        switch (action) {
+        case 's':
+        default:
+            LOG_WARNING(Debug, "vCont action {} not implemented ", action);
+            break;
+        case 'c':
+            DebugState.ResumeGuestThreads();
+            break;
+        case 't':
+            DebugState.PauseGuestThreads();
+            break;
+        }
         return OK;
         // vCont[;action[:thread-id]]
         //  c C [sig] s S [sig] t r
@@ -259,20 +355,72 @@ std::string GdbStub::handle_v_packet(const GdbCommand& command) {
     return NIMPL(command.cmd);
 }
 
-std::string GdbStub::handle_q_packet(const GdbCommand& command) {
-    if (command.cmd == "qAttached") {
-        LOG_WARNING(Debug, "qAttach probably stubbed");
-        return "1";
+// <3
+// https://stackoverflow.com/questions/14265581/parse-split-a-string-in-c-using-string-delimiter-standard-c
+std::vector<std::string> split(const std::string& din, char delim) {
+    std::vector<std::string> out;
+    std::stringstream ss(din);
+    std::string item;
+
+    while (getline(ss, item, delim)) {
+        out.push_back(item);
     }
-    if (command.cmd == "qXfer:features")
-        return target_description;
-    if (command.cmd == "qXfer:threads")
-        return BuildThreadList();
+
+    return out;
+}
+
+std::string GdbStub::handle_q_packet(const GdbCommand& command) {
+
+    const std::vector<std::string> argTokens = split(command.arg, ':');
+
+    if (command.cmd == "qAttached") {
+        return "1"; // we're always attached
+    }
+    if (command.cmd == "qTStatus") {
+        LOG_WARNING(Debug, "qTStatus probably stubbed");
+        // return "T1;tstop:0";
+        //  we're not tracing execution. yet.
+        //  skip this because it throws an error for some reason
+        // return "T0;tnotrun:0";
+    }
+    if (command.cmd == "qC") {
+        return std::format("{:x}", selectedThread);
+    }
+    if (command.cmd == "qXfer") {
+
+        if (argTokens[1] == "read") {
+            if (argTokens[0] == "features") {
+                if (argTokens[2] == "target.xml") {
+                    return target_description;
+                }
+            }
+            if (argTokens[0] == "threads") {
+                return BuildThreadList();
+            }
+        }
+    }
     if (command.cmd == "qfThreadInfo") {
+        ThreadID mainThread = getThreadByName(GAME_MAIN_THREAD_NAME);
+        u32 mainThreadEncoded = GdbData.thread_encode_id(mainThread);
+        return std::format("m {:x}", mainThreadEncoded);
         // send MAIN THREAD!!! m thread-id
     }
     if (command.cmd == "qsThreadInfo") {
+        std::string out = "m";
+        ThreadID mainThread = getThreadByName(GAME_MAIN_THREAD_NAME); // skip this one
+        GdbDataType::thread_list_t list = GdbData.thread_get_list();
+        for (const auto& [name, tid, encid] : list) {
+            if (tid == mainThread)
+                continue;
+            out += std::format("{:x},", tid);
+        }
+        out[out.length() - 1] = 'l';
+        return out;
         // send remaining threads! m tid,tid.. l (male l - koniec listy)
+    }
+    if (command.cmd == "qTfV") {
+    }
+    if (command.cmd == "qTsV") {
     }
     if (command.cmd == "qSupported") {
         LOG_WARNING(Debug, "qSupported probably stubbed");
@@ -311,98 +459,72 @@ std::string GdbStub::HandleCommand(const GdbCommand& command) {
     LOG_ERROR(Debug, "Unhandled command '{}'", command.cmd);
     return vMustReplyEmpty ? "" : E01;
 }*/
+#include <format>
+#include <string>
 
-std::string GdbStub::ReadRegisterAsString(const Register reg) {
+std::string byteSwapString(std::string data, u8 width) {
+    std::string out = "";
+    for (u8 i = 0; i < width; i += 2) {
+        out += data[width - i - 2];
+        out += data[width - i - 1];
+    }
+    return out;
+}
+
+std::string byteSwap(u64 regval, u8 width = 16) {
+    // format string to format string specifying output amount of bytes
+    std::string fstr = std::format("{{:0{}x}}", width);
+    std::string regValStr = std::vformat(fstr, std::make_format_args((regval)));
+    return byteSwapString(regValStr, width);
+}
+
+std::string GdbStub::dumpRegistersFromThread(ThreadID threadID) {
     u64 value = 0;
 
-    switch (reg) {
-    case Register::RAX:
-        asm volatile("mov %%rax, %0" : "=r"(value));
-        break;
-    case Register::RBX:
-        asm volatile("mov %%rbx, %0" : "=r"(value));
-        break;
-    case Register::RCX:
-        asm volatile("mov %%rcx, %0" : "=r"(value));
-        break;
-    case Register::RDX:
-        asm volatile("mov %%rdx, %0" : "=r"(value));
-        break;
-    case Register::RSI:
-        asm volatile("mov %%rsi, %0" : "=r"(value));
-        break;
-    case Register::RDI:
-        asm volatile("mov %%rdi, %0" : "=r"(value));
-        break;
-    case Register::RBP:
-        asm volatile("mov %%rbp, %0" : "=r"(value));
-        break;
-    case Register::RSP:
-        asm volatile("mov %%rsp, %0" : "=r"(value));
-        break;
-    case Register::R8:
-        asm volatile("mov %%r8, %0" : "=r"(value));
-        break;
-    case Register::R9:
-        asm volatile("mov %%r9, %0" : "=r"(value));
-        break;
-    case Register::R10:
-        asm volatile("mov %%r10, %0" : "=r"(value));
-        break;
-    case Register::R11:
-        asm volatile("mov %%r11, %0" : "=r"(value));
-        break;
-    case Register::R12:
-        asm volatile("mov %%r12, %0" : "=r"(value));
-        break;
-    case Register::R13:
-        asm volatile("mov %%r13, %0" : "=r"(value));
-        break;
-    case Register::R14:
-        asm volatile("mov %%r14, %0" : "=r"(value));
-        break;
-    case Register::R15: // For some reason, IDA requests this register, even though it gets it from
-                        // 'g' as well
-        asm volatile("mov %%r15, %0" : "=r"(value));
-        break;
-    case Register::RIP:
-        asm volatile("lea (%%rip), %0" : "=r"(value));
-        break;
-        /*   case Register::EFLAGS:
-               asm volatile("pushfq; pop %0" : "=r"(value));
-               break;
-           case Register::CS:
-               asm volatile("mov %%cs, %0" : "=r"(value));
-               break;
-           case Register::SS:
-               asm volatile("mov %%ss, %0" : "=r"(value));
-               break;
-           case Register::DS:
-               asm volatile("mov %%ds, %0" : "=r"(value));
-               break;
-           case Register::ES:
-               asm volatile("mov %%es, %0" : "=r"(value));
-               break;
-           case Register::FS:
-               asm volatile("mov %%fs, %0" : "=r"(value));
-               break;
-           case Register::GS:
-               asm volatile("mov %%gs, %0" : "=r"(value));
-               break;*/
-    default:
-        return "00000000000000";
-    }
+    std::string regs = "";
 
-    std::string formatted;
-#if defined(__GNUC__)
-    formatted = fmt::format("{:016x}", __builtin_bswap64(value));
-#elif defined(_MSC_VER)
-    formatted = fmt::format("{:016x}", _byteswap_uint64(value));
-#else
-#error "What the fuck is this compiler"
-#endif
-    LOG_INFO(Debug, "Endian swapped value of {} is '{}'", magic_enum::enum_name(reg), formatted);
-    return formatted;
+    ucontext_t ctx = GdbData.thread_get_ctx(threadID);
+
+    // TODO: Is there a way to do this with a custom match function?
+    // 64-bit registers
+    for (const auto& [regIdx, regName] : GPRegister) {
+
+        u64 regval = ctx.uc_mcontext.gregs[regIdx];
+
+        LOG_INFO(Debug, "Reading reg: {:>10} - {:>2} - {:>20x}", regName, regIdx, regval);
+
+        // LOG_INFO(Debug, "Endian swapped value of {} is '{}'", magic_enum::enum_name(reg),
+        //          formatted);
+        regs += byteSwap(regval);
+    }
+    {
+        // I think 64-bit registers
+        u64 csgsfs = ctx.uc_mcontext.gregs[REG_CSGSFS];
+        LOG_INFO(Debug, "Reading reg: REG_CSGSFS - 18 - {:>20x}", csgsfs & 0xFFFFFFFFFFFF0000);
+        regs += byteSwap((csgsfs >> 48) & 0xFFFF); // CS
+        regs += byteSwap(0);                       // SS
+        regs += byteSwap(0);                       // DS
+        regs += byteSwap(0);                       // ES
+        regs += byteSwap((csgsfs >> 16) & 0xFFFF); // FS
+        regs += byteSwap((csgsfs >> 32) & 0xFFFF); // GS
+        // regs += byteSwap((spec >>48) &0xFFFF);
+    }
+    {
+        fpregset_t fpregs = ctx.uc_mcontext.fpregs;
+        // 80-bit fp registers
+        for (u8 i = 0; i < 8; i++) {
+            struct _libc_fpxreg fpreg = fpregs->_st[i];
+            std::string fpval = "";
+            fpval += std::format("{:04x}", fpreg.significand[3]);
+            fpval += std::format("{:04x}", fpreg.significand[2]);
+            fpval += std::format("{:04x}", fpreg.significand[1]);
+            fpval += std::format("{:04x}", fpreg.significand[0]);
+            fpval += std::format("{:04x}", fpreg.exponent);
+            LOG_INFO(Debug, "Reading reg: {:>10} - {:>2} - {}", "_st", i, fpval);
+            regs += byteSwapString(fpval, 20);
+        }
+    }
+    return regs;
 }
 
 void GdbStub::Run(const std::stop_token& stop) {

@@ -51,7 +51,6 @@ void DebugStateImpl::ResumeGuestThreads() {
     Libraries::Kernel::Dev::GetInitialPtc() += delta_time;
 
     GdbData.thread_resume_all(&is_guest_threads_paused);
-
 }
 
 void DebugStateImpl::RequestFrameDump(s32 count) {
