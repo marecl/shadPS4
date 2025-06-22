@@ -1057,10 +1057,6 @@
       <translation>L3</translation>
     </message>
     <message>
-      <source>Touchpad Click</source>
-      <translation>Clic tactile</translation>
-    </message>
-    <message>
       <source>Mouse to Joystick</source>
       <translation>Souris vers Joystick</translation>
     </message>
@@ -1153,10 +1149,6 @@
       <translation>Impossible de sauvegarder</translation>
     </message>
     <message>
-      <source>Cannot bind any unique input more than once</source>
-      <translation>Impossible de lier une entrée unique plus d'une fois</translation>
-    </message>
-    <message>
       <source>Press a key</source>
       <translation>Appuyez sur un bouton</translation>
     </message>
@@ -1183,6 +1175,26 @@
     <message>
       <source>Cancel</source>
       <translation>Annuler</translation>
+    </message>
+    <message>
+      <source>Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</source>
+      <translation type="unfinished">Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</translation>
+    </message>
+    <message>
+      <source>Touchpad Left</source>
+      <translation type="unfinished">Touchpad Left</translation>
+    </message>
+    <message>
+      <source>Touchpad Center</source>
+      <translation type="unfinished">Touchpad Center</translation>
+    </message>
+    <message>
+      <source>Touchpad Right</source>
+      <translation type="unfinished">Touchpad Right</translation>
     </message>
   </context>
   <context>
@@ -1346,10 +1358,6 @@
     <message>
       <source>Game List</source>
       <translation>Liste de jeux</translation>
-    </message>
-    <message>
-      <source> * Unsupported Vulkan Version</source>
-      <translation> * Version de Vulkan non prise en charge</translation>
     </message>
     <message>
       <source>Download Cheats For All Installed Games</source>
@@ -1545,10 +1553,6 @@
     <message>
       <source>Controller</source>
       <translation>Manette</translation>
-    </message>
-    <message>
-      <source>Back Button Behavior</source>
-      <translation>Comportement du bouton retour</translation>
     </message>
     <message>
       <source>Graphics</source>
@@ -1787,10 +1791,6 @@
       <translation>Définissez un temps pour que la souris disparaisse après être inactif.</translation>
     </message>
     <message>
-      <source>Back Button Behavior:\nSets the controller&apos;s back button to emulate tapping the specified position on the PS4 touchpad.</source>
-      <translation>Comportement du bouton retour:\nDéfinit le bouton de retour de la manette pour imiter le toucher de la position spécifiée sur le pavé tactile PS4.</translation>
-    </message>
-    <message>
       <source>Display Compatibility Data:\nDisplays game compatibility information in table view. Enable &quot;Update Compatibility On Startup&quot; to get up-to-date information.</source>
       <translation>Afficher les données de compatibilité:\nAffiche les informations de compatibilité des jeux dans une colonne dédiée. Activez &quot;Mettre à jour la compatibilité au démarrage&quot; pour avoir des informations à jour.</translation>
     </message>
@@ -1813,22 +1813,6 @@
     <message>
       <source>Always</source>
       <translation>Toujours</translation>
-    </message>
-    <message>
-      <source>Touchpad Left</source>
-      <translation>Pavé Tactile Gauche</translation>
-    </message>
-    <message>
-      <source>Touchpad Right</source>
-      <translation>Pavé Tactile Droit</translation>
-    </message>
-    <message>
-      <source>Touchpad Center</source>
-      <translation>Centre du Pavé Tactile</translation>
-    </message>
-    <message>
-      <source>None</source>
-      <translation>Aucun</translation>
     </message>
     <message>
       <source>Graphics Device:\nOn multiple GPU systems, select the GPU the emulator will use from the drop down list,\nor select &quot;Auto Select&quot; to automatically determine it.</source>
@@ -2049,6 +2033,10 @@
     <message>
       <source>Open the custom trophy images/sounds folder:\nYou can add custom images to the trophies and an audio.\nAdd the files to custom_trophy with the following names:\ntrophy.wav OR trophy.mp3, bronze.png, gold.png, platinum.png, silver.png\nNote: The sound will only work in QT versions.</source>
       <translation>Ouvrez le dossier des images/sons des trophées personnalisés:\nVous pouvez ajouter des images personnalisées aux trophées et aux sons.\nAjoutez les fichiers à custom_trophy avec les noms suivants:\ntrophy.wav OU trophy.mp3, bronze.png, gold.png, platinum.png, silver.png\nNote : Le son ne fonctionnera que dans les versions QT.</translation>
+    </message>
+    <message>
+      <source> * Unsupported Vulkan Version</source>
+      <translation> * Version de Vulkan non prise en charge</translation>
     </message>
   </context>
   <context>

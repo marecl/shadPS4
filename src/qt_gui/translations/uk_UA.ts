@@ -1057,10 +1057,6 @@
       <translation>Кнопка лівого стику</translation>
     </message>
     <message>
-      <source>Touchpad Click</source>
-      <translation>Натискання на сенсорну панель</translation>
-    </message>
-    <message>
       <source>Mouse to Joystick</source>
       <translation>Миша в джойстик</translation>
     </message>
@@ -1153,10 +1149,6 @@
       <translation>Не вдалося зберегти</translation>
     </message>
     <message>
-      <source>Cannot bind any unique input more than once</source>
-      <translation>Не можна прив'язати кнопку вводу більш ніж один раз</translation>
-    </message>
-    <message>
       <source>Press a key</source>
       <translation>Натисніть клавішу</translation>
     </message>
@@ -1183,6 +1175,26 @@
     <message>
       <source>Cancel</source>
       <translation>Відмінити</translation>
+    </message>
+    <message>
+      <source>Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</source>
+      <translation type="unfinished">Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</translation>
+    </message>
+    <message>
+      <source>Touchpad Left</source>
+      <translation type="unfinished">Touchpad Left</translation>
+    </message>
+    <message>
+      <source>Touchpad Center</source>
+      <translation type="unfinished">Touchpad Center</translation>
+    </message>
+    <message>
+      <source>Touchpad Right</source>
+      <translation type="unfinished">Touchpad Right</translation>
     </message>
   </context>
   <context>
@@ -1346,10 +1358,6 @@
     <message>
       <source>Game List</source>
       <translation>Список ігор</translation>
-    </message>
-    <message>
-      <source> * Unsupported Vulkan Version</source>
-      <translation> * Непідтримувана версія Vulkan</translation>
     </message>
     <message>
       <source>Download Cheats For All Installed Games</source>
@@ -1545,10 +1553,6 @@
     <message>
       <source>Controller</source>
       <translation>Контролер</translation>
-    </message>
-    <message>
-      <source>Back Button Behavior</source>
-      <translation>Перепризначення кнопки назад</translation>
     </message>
     <message>
       <source>Graphics</source>
@@ -1787,10 +1791,6 @@
       <translation>Встановіть час, через який курсор зникне в разі бездіяльності.</translation>
     </message>
     <message>
-      <source>Back Button Behavior:\nSets the controller&apos;s back button to emulate tapping the specified position on the PS4 touchpad.</source>
-      <translation>Перепризначення кнопки «Назад»:\nНалаштовує кнопку «Назад» контролера на емуляцію натискання на зазначену область на сенсорній панелі контролера PS4.</translation>
-    </message>
-    <message>
       <source>Display Compatibility Data:\nDisplays game compatibility information in table view. Enable &quot;Update Compatibility On Startup&quot; to get up-to-date information.</source>
       <translation>Відображати данні ігрової сумістністі:\nВідображає інформацію про сумісність ігор у вигляді таблиці. Увімкніть &quot;Оновлення даних ігрової сумісності під час запуску&quot; для отримання актуальної інформації.</translation>
     </message>
@@ -1813,22 +1813,6 @@
     <message>
       <source>Always</source>
       <translation>Завжди</translation>
-    </message>
-    <message>
-      <source>Touchpad Left</source>
-      <translation>Ліва сторона тачпаду</translation>
-    </message>
-    <message>
-      <source>Touchpad Right</source>
-      <translation>Права сторона тачпаду</translation>
-    </message>
-    <message>
-      <source>Touchpad Center</source>
-      <translation>Середина тачпаду</translation>
-    </message>
-    <message>
-      <source>None</source>
-      <translation>Без змін</translation>
     </message>
     <message>
       <source>Graphics Device:\nOn multiple GPU systems, select the GPU the emulator will use from the drop down list,\nor select &quot;Auto Select&quot; to automatically determine it.</source>
@@ -2049,6 +2033,10 @@
     <message>
       <source>Open the custom trophy images/sounds folder:\nYou can add custom images to the trophies and an audio.\nAdd the files to custom_trophy with the following names:\ntrophy.wav OR trophy.mp3, bronze.png, gold.png, platinum.png, silver.png\nNote: The sound will only work in QT versions.</source>
       <translation>Відкрити папку користувацьких зображень трофеїв/звуків:\nВи можете додати користувацькі зображення до трофеїв та звук.\nДодайте файли до теки custom_trophy з такими назвами:\ntrophy.wav АБО trophy.mp3, bronze.png, gold.png, platinum.png, silver.png\nПримітка: Звук буде працювати лише у версіях ShadPS4 з графічним інтерфейсом.</translation>
+    </message>
+    <message>
+      <source> * Unsupported Vulkan Version</source>
+      <translation type="unfinished"> * Unsupported Vulkan Version</translation>
     </message>
   </context>
   <context>

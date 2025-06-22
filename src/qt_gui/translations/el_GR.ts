@@ -1057,10 +1057,6 @@
       <translation type="unfinished">L3</translation>
     </message>
     <message>
-      <source>Touchpad Click</source>
-      <translation type="unfinished">Touchpad Click</translation>
-    </message>
-    <message>
       <source>Mouse to Joystick</source>
       <translation type="unfinished">Mouse to Joystick</translation>
     </message>
@@ -1153,10 +1149,6 @@
       <translation type="unfinished">Unable to Save</translation>
     </message>
     <message>
-      <source>Cannot bind any unique input more than once</source>
-      <translation type="unfinished">Cannot bind any unique input more than once</translation>
-    </message>
-    <message>
       <source>Press a key</source>
       <translation type="unfinished">Press a key</translation>
     </message>
@@ -1183,6 +1175,26 @@
     <message>
       <source>Cancel</source>
       <translation type="unfinished">Cancel</translation>
+    </message>
+    <message>
+      <source>Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</source>
+      <translation type="unfinished">Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</translation>
+    </message>
+    <message>
+      <source>Touchpad Left</source>
+      <translation type="unfinished">Touchpad Left</translation>
+    </message>
+    <message>
+      <source>Touchpad Center</source>
+      <translation type="unfinished">Touchpad Center</translation>
+    </message>
+    <message>
+      <source>Touchpad Right</source>
+      <translation type="unfinished">Touchpad Right</translation>
     </message>
   </context>
   <context>
@@ -1346,10 +1358,6 @@
     <message>
       <source>Game List</source>
       <translation>Λίστα παιχνιδιών</translation>
-    </message>
-    <message>
-      <source> * Unsupported Vulkan Version</source>
-      <translation> * Μη υποστηριζόμενη έκδοση Vulkan</translation>
     </message>
     <message>
       <source>Download Cheats For All Installed Games</source>
@@ -1545,10 +1553,6 @@
     <message>
       <source>Controller</source>
       <translation type="unfinished">Controller</translation>
-    </message>
-    <message>
-      <source>Back Button Behavior</source>
-      <translation>Συμπεριφορά κουμπιού επιστροφής</translation>
     </message>
     <message>
       <source>Graphics</source>
@@ -1787,10 +1791,6 @@
       <translation>Ορίστε έναν χρόνο για να εξαφανιστεί το ποντίκι μετά από αδράνεια.</translation>
     </message>
     <message>
-      <source>Back Button Behavior:\nSets the controller&apos;s back button to emulate tapping the specified position on the PS4 touchpad.</source>
-      <translation>Συμπεριφορά Κουμπιού Επιστροφής:\nΟρίζει το κουμπί επιστροφής του ελεγκτή να προσομοιώνει το πάτημα της καθορισμένης θέσης στην οθόνη αφής PS4.</translation>
-    </message>
-    <message>
       <source>Display Compatibility Data:\nDisplays game compatibility information in table view. Enable &quot;Update Compatibility On Startup&quot; to get up-to-date information.</source>
       <translation type="unfinished">Display Compatibility Data:\nDisplays game compatibility information in table view. Enable &quot;Update Compatibility On Startup&quot; to get up-to-date information.</translation>
     </message>
@@ -1813,22 +1813,6 @@
     <message>
       <source>Always</source>
       <translation>Πάντα</translation>
-    </message>
-    <message>
-      <source>Touchpad Left</source>
-      <translation>Touchpad Αριστερά</translation>
-    </message>
-    <message>
-      <source>Touchpad Right</source>
-      <translation>Touchpad Δεξιά</translation>
-    </message>
-    <message>
-      <source>Touchpad Center</source>
-      <translation>Κέντρο Touchpad</translation>
-    </message>
-    <message>
-      <source>None</source>
-      <translation>Κανένα</translation>
     </message>
     <message>
       <source>Graphics Device:\nOn multiple GPU systems, select the GPU the emulator will use from the drop down list,\nor select &quot;Auto Select&quot; to automatically determine it.</source>
@@ -2049,6 +2033,10 @@
     <message>
       <source>Open the custom trophy images/sounds folder:\nYou can add custom images to the trophies and an audio.\nAdd the files to custom_trophy with the following names:\ntrophy.wav OR trophy.mp3, bronze.png, gold.png, platinum.png, silver.png\nNote: The sound will only work in QT versions.</source>
       <translation type="unfinished">Open the custom trophy images/sounds folder:\nYou can add custom images to the trophies and an audio.\nAdd the files to custom_trophy with the following names:\ntrophy.wav OR trophy.mp3, bronze.png, gold.png, platinum.png, silver.png\nNote: The sound will only work in QT versions.</translation>
+    </message>
+    <message>
+      <source> * Unsupported Vulkan Version</source>
+      <translation type="unfinished"> * Unsupported Vulkan Version</translation>
     </message>
   </context>
   <context>
