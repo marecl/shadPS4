@@ -20,7 +20,7 @@ namespace Shader::Gcn {
 enum class ConditionOp : u32 {
     F,
     EQ,
-    LG,
+    LG, // NE
     GT,
     GE,
     LT,
@@ -230,7 +230,7 @@ public:
     // VOPC
     void V_CMP_F32(ConditionOp op, bool set_exec, const GcnInst& inst);
     void V_CMP_U32(ConditionOp op, bool is_signed, bool set_exec, const GcnInst& inst);
-    void V_CMP_NE_U64(const GcnInst& inst);
+    void V_CMP_U64(ConditionOp op, bool is_signed, bool set_exec, const GcnInst& inst);
     void V_CMP_CLASS_F32(const GcnInst& inst);
 
     // VOP3a
@@ -265,32 +265,26 @@ public:
 
     // Vector interpolation
     // VINTRP
+    void V_INTERP_P1_F32(const GcnInst& inst);
     void V_INTERP_P2_F32(const GcnInst& inst);
     void V_INTERP_MOV_F32(const GcnInst& inst);
 
     // Data share
     // DS
-    void DS_ADD_U32(const GcnInst& inst, bool rtn);
-    void DS_ADD_U64(const GcnInst& inst, bool rtn);
-    void DS_MIN_U32(const GcnInst& inst, bool is_signed, bool rtn);
-    void DS_MAX_U32(const GcnInst& inst, bool is_signed, bool rtn);
+    template <typename T = IR::U32>
+    void DS_OP(const GcnInst& inst, AtomicOp op, bool rtn);
     void DS_WRITE(int bit_size, bool is_signed, bool is_pair, bool stride64, const GcnInst& inst);
-    void DS_SWIZZLE_B32(const GcnInst& inst);
-    void DS_AND_B32(const GcnInst& inst, bool rtn);
-    void DS_OR_B32(const GcnInst& inst, bool rtn);
-    void DS_XOR_B32(const GcnInst& inst, bool rtn);
     void DS_READ(int bit_size, bool is_signed, bool is_pair, bool stride64, const GcnInst& inst);
+    void DS_SWIZZLE_B32(const GcnInst& inst);
     void DS_APPEND(const GcnInst& inst);
     void DS_CONSUME(const GcnInst& inst);
-    void DS_SUB_U32(const GcnInst& inst, bool rtn);
-    void DS_INC_U32(const GcnInst& inst, bool rtn);
-    void DS_DEC_U32(const GcnInst& inst, bool rtn);
 
     // Buffer Memory
     // MUBUF / MTBUF
     void BUFFER_LOAD(u32 num_dwords, bool is_inst_typed, bool is_buffer_typed, const GcnInst& inst);
     void BUFFER_STORE(u32 num_dwords, bool is_inst_typed, bool is_buffer_typed,
                       const GcnInst& inst);
+    template <typename T = IR::U32>
     void BUFFER_ATOMIC(AtomicOp op, const GcnInst& inst);
 
     // Image Memory
@@ -330,7 +324,6 @@ private:
     void LogMissingOpcode(const GcnInst& inst);
 
     IR::VectorReg GetScratchVgpr(u32 offset);
-    IR::VectorReg GatherInterpQualifiers();
 
 private:
     IR::IREmitter ir;
@@ -339,8 +332,7 @@ private:
     const Profile& profile;
     u32 next_vgpr_num;
     std::unordered_map<u32, IR::VectorReg> vgpr_map;
-    std::array<IR::Interpolation, MaxInterpVgpr> vgpr_to_interp{};
-    IR::VectorReg dst_frag_vreg{};
+    std::array<IR::Attribute, MaxInterpVgpr> vgpr_to_interp{};
     bool opcode_missing = false;
 };
 

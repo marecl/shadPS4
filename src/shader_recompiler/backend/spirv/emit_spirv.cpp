@@ -293,14 +293,22 @@ void SetupCapabilities(const Info& info, const Profile& profile, EmitContext& ct
     if (stage == LogicalStage::Geometry) {
         ctx.AddCapability(spv::Capability::Geometry);
     }
-    if (info.stage == Stage::Fragment && profile.needs_manual_interpolation) {
-        ctx.AddExtension("SPV_KHR_fragment_shader_barycentric");
-        ctx.AddCapability(spv::Capability::FragmentBarycentricKHR);
+    if (info.stage == Stage::Fragment) {
+        if (profile.supports_amd_shader_explicit_vertex_parameter) {
+            ctx.AddExtension("SPV_AMD_shader_explicit_vertex_parameter");
+        } else if (profile.supports_fragment_shader_barycentric) {
+            ctx.AddExtension("SPV_KHR_fragment_shader_barycentric");
+            ctx.AddCapability(spv::Capability::FragmentBarycentricKHR);
+        }
+        if (info.loads.GetAny(IR::Attribute::BaryCoordSmoothSample) ||
+            info.loads.GetAny(IR::Attribute::BaryCoordNoPerspSample)) {
+            ctx.AddCapability(spv::Capability::SampleRateShading);
+        }
     }
     if (stage == LogicalStage::TessellationControl || stage == LogicalStage::TessellationEval) {
         ctx.AddCapability(spv::Capability::Tessellation);
     }
-    if (info.dma_types != IR::Type::Void) {
+    if (info.uses_dma) {
         ctx.AddCapability(spv::Capability::PhysicalStorageBufferAddresses);
         ctx.AddExtension("SPV_KHR_physical_storage_buffer");
     }
@@ -309,6 +317,19 @@ void SetupCapabilities(const Info& info, const Profile& profile, EmitContext& ct
         ctx.AddExtension("SPV_KHR_workgroup_memory_explicit_layout");
         ctx.AddCapability(spv::Capability::WorkgroupMemoryExplicitLayoutKHR);
         ctx.AddCapability(spv::Capability::WorkgroupMemoryExplicitLayout16BitAccessKHR);
+    }
+    if (info.uses_buffer_int64_atomics || info.uses_shared_int64_atomics) {
+        if (info.uses_buffer_int64_atomics) {
+            ASSERT_MSG(ctx.profile.supports_buffer_int64_atomics,
+                       "Shader requires support for atomic Int64 buffer operations that your "
+                       "Vulkan instance does not advertise");
+        }
+        if (info.uses_shared_int64_atomics) {
+            ASSERT_MSG(ctx.profile.supports_shared_int64_atomics,
+                       "Shader requires support for atomic Int64 shared memory operations that "
+                       "your Vulkan instance does not advertise");
+        }
+        ctx.AddCapability(spv::Capability::Int64Atomics);
     }
 }
 

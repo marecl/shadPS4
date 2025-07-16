@@ -437,7 +437,7 @@ void SettingsDialog::LoadValuesFromConfig() {
                                 toml::find_or<int>(data, "Settings", "consoleLanguage", 6))) %
         languageIndexes.size());
     ui->emulatorLanguageComboBox->setCurrentIndex(
-        languages[toml::find_or<std::string>(data, "GUI", "emulatorLanguage", "en_US")]);
+        languages[m_gui_settings->GetValue(gui::gen_guiLanguage).toString().toStdString()]);
     ui->hideCursorComboBox->setCurrentIndex(toml::find_or<int>(data, "Input", "cursorState", 1));
     OnCursorStateChanged(toml::find_or<int>(data, "Input", "cursorState", 1));
     ui->idleTimeoutSpinBox->setValue(toml::find_or<int>(data, "Input", "cursorHideTimeout", 5));
@@ -762,8 +762,8 @@ void SettingsDialog::UpdateSettings() {
     m_gui_settings->SetValue(gui::gl_backgroundMusicVolume, ui->BGMVolumeSlider->value());
     Config::setLanguage(languageIndexes[ui->consoleLanguageComboBox->currentIndex()]);
     Config::setEnableDiscordRPC(ui->discordRPCCheckbox->isChecked());
-    Config::setScreenWidth(ui->widthSpinBox->value());
-    Config::setScreenHeight(ui->heightSpinBox->value());
+    Config::setWindowWidth(ui->widthSpinBox->value());
+    Config::setWindowHeight(ui->heightSpinBox->value());
     Config::setVblankDiv(ui->vblankSpinBox->value());
     Config::setDumpShaders(ui->dumpShadersCheckBox->isChecked());
     Config::setNullGpu(ui->nullGpuCheckBox->isChecked());

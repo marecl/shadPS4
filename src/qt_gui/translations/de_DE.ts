@@ -454,32 +454,8 @@
       <translation>Benutze Per-Game Einstellungen</translation>
     </message>
     <message>
-      <source>L1 / LB</source>
-      <translation>L1 / LB</translation>
-    </message>
-    <message>
-      <source>L2 / LT</source>
-      <translation>L2 / LT</translation>
-    </message>
-    <message>
-      <source>Back</source>
-      <translation>Zurück</translation>
-    </message>
-    <message>
-      <source>R1 / RB</source>
-      <translation>R1 / RB</translation>
-    </message>
-    <message>
-      <source>R2 / RT</source>
-      <translation>R2 / RT</translation>
-    </message>
-    <message>
       <source>L3</source>
       <translation>L3</translation>
-    </message>
-    <message>
-      <source>Options / Start</source>
-      <translation>Options / Start</translation>
     </message>
     <message>
       <source>R3</source>
@@ -488,22 +464,6 @@
     <message>
       <source>Face Buttons</source>
       <translation>Aktionstasten</translation>
-    </message>
-    <message>
-      <source>Triangle / Y</source>
-      <translation>Dreieck / Y</translation>
-    </message>
-    <message>
-      <source>Square / X</source>
-      <translation>Quadrat / X</translation>
-    </message>
-    <message>
-      <source>Circle / B</source>
-      <translation>Kreis / B</translation>
-    </message>
-    <message>
-      <source>Cross / A</source>
-      <translation>Kreuz / A</translation>
     </message>
     <message>
       <source>Right Stick Deadzone (def:2, max:127)</source>
@@ -564,6 +524,73 @@
     <message>
       <source>Cancel</source>
       <translation>Abbrechen</translation>
+    </message>
+    <message>
+      <source>unmapped</source>
+      <translation>Nicht zugeordnet</translation>
+    </message>
+    <message>
+      <source>L1</source>
+      <translation>L1</translation>
+    </message>
+    <message>
+      <source>R1</source>
+      <translation>R1</translation>
+    </message>
+    <message>
+      <source>L2</source>
+      <translation>L2</translation>
+    </message>
+    <message>
+      <source>Options</source>
+      <translation>Optionen</translation>
+    </message>
+    <message>
+      <source>R2</source>
+      <translation>R2</translation>
+    </message>
+    <message>
+      <source>Touchpad Left</source>
+      <translation>Touchpad Links</translation>
+    </message>
+    <message>
+      <source>Touchpad Center</source>
+      <translation>Touchpad Mitte</translation>
+    </message>
+    <message>
+      <source>Touchpad Right</source>
+      <translation>Touchpad Rechts</translation>
+    </message>
+    <message>
+      <source>Triangle</source>
+      <translation>Dreieck</translation>
+    </message>
+    <message>
+      <source>Square</source>
+      <translation>Quadrat</translation>
+    </message>
+    <message>
+      <source>Circle</source>
+      <translation>Kreis</translation>
+    </message>
+    <message>
+      <source>Cross</source>
+      <translation>Kreuz</translation>
+    </message>
+    <message>
+      <source>Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</source>
+      <translation>%1
+Einzigartige Inputs können nicht öfters als einmal gebunden werden. Input-Duplikate werden auf folgende Knöpfe gebunden</translation>
+    </message>
+    <message>
+      <source>Press a button</source>
+      <translation>Drücke einen Knopf</translation>
+    </message>
+    <message>
+      <source>Move analog stick</source>
+      <translation>Bewege den Analogstick</translation>
     </message>
   </context>
   <context>
@@ -747,6 +774,10 @@
     <message>
       <source>Last updated</source>
       <translation>Zuletzt aktualisiert</translation>
+    </message>
+    <message>
+      <source>Favorite</source>
+      <translation>Favoriten</translation>
     </message>
   </context>
   <context>
@@ -949,6 +980,14 @@
     <message>
       <source>SFO Viewer for </source>
       <translation>SFO-Betrachter für </translation>
+    </message>
+    <message>
+      <source>Remove from Favorites</source>
+      <translation>Von Favoriten Entfernen</translation>
+    </message>
+    <message>
+      <source>Add to Favorites</source>
+      <translation>Zu Favoriten hinzufügen</translation>
     </message>
   </context>
   <context>
@@ -1186,15 +1225,15 @@
     </message>
     <message>
       <source>Touchpad Left</source>
-      <translation type="unfinished">Touchpad Left</translation>
+      <translation>Touchpad Links</translation>
     </message>
     <message>
       <source>Touchpad Center</source>
-      <translation type="unfinished">Touchpad Center</translation>
+      <translation>Touchpad Mitte</translation>
     </message>
     <message>
       <source>Touchpad Right</source>
-      <translation type="unfinished">Touchpad Right</translation>
+      <translation>Touchpad Rechts</translation>
     </message>
   </context>
   <context>
@@ -2040,7 +2079,7 @@ Hinweis: Der Sound funktioniert nur in Qt-Versionen.</translation>
     </message>
     <message>
       <source> * Unsupported Vulkan Version</source>
-      <translation type="unfinished"> * Unsupported Vulkan Version</translation>
+      <translation> * Nicht unterstützte Vulkan Version</translation>
     </message>
   </context>
   <context>

@@ -454,32 +454,8 @@
       <translation>Використовувати ігрові конфігурації</translation>
     </message>
     <message>
-      <source>L1 / LB</source>
-      <translation>L1 / Лівий Бампер</translation>
-    </message>
-    <message>
-      <source>L2 / LT</source>
-      <translation>L2 / Лівий Тригер</translation>
-    </message>
-    <message>
-      <source>Back</source>
-      <translation>Назад</translation>
-    </message>
-    <message>
-      <source>R1 / RB</source>
-      <translation>R1 / Правий Бампер</translation>
-    </message>
-    <message>
-      <source>R2 / RT</source>
-      <translation>R2 / Правий Тригер</translation>
-    </message>
-    <message>
       <source>L3</source>
       <translation>Кнопка лівого стику</translation>
-    </message>
-    <message>
-      <source>Options / Start</source>
-      <translation>Опції / Старт</translation>
     </message>
     <message>
       <source>R3</source>
@@ -488,22 +464,6 @@
     <message>
       <source>Face Buttons</source>
       <translation>Лицьові кнопки</translation>
-    </message>
-    <message>
-      <source>Triangle / Y</source>
-      <translation>Трикутник / Y</translation>
-    </message>
-    <message>
-      <source>Square / X</source>
-      <translation>Квадрат / X</translation>
-    </message>
-    <message>
-      <source>Circle / B</source>
-      <translation>Коло / B</translation>
-    </message>
-    <message>
-      <source>Cross / A</source>
-      <translation>Хрест / A</translation>
     </message>
     <message>
       <source>Right Stick Deadzone (def:2, max:127)</source>
@@ -564,6 +524,74 @@
     <message>
       <source>Cancel</source>
       <translation>Відмінити</translation>
+    </message>
+    <message>
+      <source>unmapped</source>
+      <translation>Не назначено</translation>
+    </message>
+    <message>
+      <source>L1</source>
+      <translation>L1</translation>
+    </message>
+    <message>
+      <source>R1</source>
+      <translation>R1</translation>
+    </message>
+    <message>
+      <source>L2</source>
+      <translation>L2</translation>
+    </message>
+    <message>
+      <source>Options</source>
+      <translation>Опції</translation>
+    </message>
+    <message>
+      <source>R2</source>
+      <translation>R2</translation>
+    </message>
+    <message>
+      <source>Touchpad Left</source>
+      <translation>Ліва сторона сенсору</translation>
+    </message>
+    <message>
+      <source>Touchpad Center</source>
+      <translation>Середина сенсору</translation>
+    </message>
+    <message>
+      <source>Touchpad Right</source>
+      <translation>Права сторона сенсору</translation>
+    </message>
+    <message>
+      <source>Triangle</source>
+      <translation>Трикутник</translation>
+    </message>
+    <message>
+      <source>Square</source>
+      <translation>Квадрат</translation>
+    </message>
+    <message>
+      <source>Circle</source>
+      <translation>Коло</translation>
+    </message>
+    <message>
+      <source>Cross</source>
+      <translation>Хрест</translation>
+    </message>
+    <message>
+      <source>Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</source>
+      <translation>Неможливо призначити одну й ту саму кнопку більше одного разу. Повторне призначення виявлено для таких кнопок:
+
+%1</translation>
+    </message>
+    <message>
+      <source>Press a button</source>
+      <translation>Натисніть кнопку</translation>
+    </message>
+    <message>
+      <source>Move analog stick</source>
+      <translation>Перемістити аналоговий стік</translation>
     </message>
   </context>
   <context>
@@ -747,6 +775,10 @@
     <message>
       <source>Last updated</source>
       <translation>Останнє оновлення</translation>
+    </message>
+    <message>
+      <source>Favorite</source>
+      <translation>Обране</translation>
     </message>
   </context>
   <context>
@@ -949,6 +981,14 @@
     <message>
       <source>SFO Viewer for </source>
       <translation>Перегляд SFO </translation>
+    </message>
+    <message>
+      <source>Remove from Favorites</source>
+      <translation>Видалити з обраного</translation>
+    </message>
+    <message>
+      <source>Add to Favorites</source>
+      <translation>Додати до обраного</translation>
     </message>
   </context>
   <context>
@@ -1180,21 +1220,21 @@
       <source>Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
 
 %1</source>
-      <translation type="unfinished">Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+      <translation>Унікальний вхід не може бути призначений двічі. Дублікати на кнопках:
 
 %1</translation>
     </message>
     <message>
       <source>Touchpad Left</source>
-      <translation type="unfinished">Touchpad Left</translation>
+      <translation>Ліва сторона сенсору</translation>
     </message>
     <message>
       <source>Touchpad Center</source>
-      <translation type="unfinished">Touchpad Center</translation>
+      <translation>Середина сенсору</translation>
     </message>
     <message>
       <source>Touchpad Right</source>
-      <translation type="unfinished">Touchpad Right</translation>
+      <translation>Права сторона сенсору</translation>
     </message>
   </context>
   <context>
@@ -2036,7 +2076,7 @@
     </message>
     <message>
       <source> * Unsupported Vulkan Version</source>
-      <translation type="unfinished"> * Unsupported Vulkan Version</translation>
+      <translation> * Непідтримувана версія Vulkan</translation>
     </message>
   </context>
   <context>

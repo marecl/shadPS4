@@ -109,6 +109,11 @@ public:
         return depth_clip_control;
     }
 
+    /// Returns true when VK_EXT_depth_clip_enable is supported
+    bool IsDepthClipEnableSupported() const {
+        return depth_clip_enable;
+    }
+
     /// Returns true when VK_EXT_depth_range_unrestricted is supported
     bool IsDepthRangeUnrestrictedSupported() const {
         return depth_range_unrestricted;
@@ -140,6 +145,11 @@ public:
         return fragment_shader_barycentric;
     }
 
+    /// Returns true when VK_AMD_shader_explicit_vertex_parameter is supported.
+    bool IsAmdShaderExplicitVertexParameterSupported() const {
+        return amd_shader_explicit_vertex_parameter;
+    }
+
     /// Returns true when VK_EXT_primitive_topology_list_restart is supported.
     bool IsListRestartSupported() const {
         return list_restart;
@@ -148,6 +158,11 @@ public:
     /// Returns true when VK_EXT_legacy_vertex_attributes is supported.
     bool IsLegacyVertexAttributesSupported() const {
         return legacy_vertex_attributes;
+    }
+
+    /// Returns true when VK_EXT_provoking_vertex is supported.
+    bool IsProvokingVertexSupported() const {
+        return provoking_vertex;
     }
 
     /// Returns true when VK_AMD_shader_image_load_store_lod is supported.
@@ -176,6 +191,16 @@ public:
     /// VK_EXT_shader_atomic_float2 is supported.
     bool IsShaderAtomicFloatImage32MinMaxSupported() const {
         return shader_atomic_float2 && shader_atomic_float2_features.shaderImageFloat32AtomicMinMax;
+    }
+
+    /// Returns true if 64-bit integer atomic operations can be used on buffers
+    bool IsBufferInt64AtomicsSupported() const {
+        return vk12_features.shaderBufferInt64Atomics;
+    }
+
+    /// Returns true if 64-bit integer atomic operations can be used on shared memory
+    bool IsSharedInt64AtomicsSupported() const {
+        return vk12_features.shaderSharedInt64Atomics;
     }
 
     /// Returns true when VK_KHR_workgroup_memory_explicit_layout is supported.
@@ -314,9 +339,19 @@ public:
         return properties.limits.maxViewportDimensions[0];
     }
 
-    ///  Returns the maximum viewport height.
+    /// Returns the maximum viewport height.
     u32 GetMaxViewportHeight() const {
         return properties.limits.maxViewportDimensions[1];
+    }
+
+    /// Returns the maximum render area width.
+    u32 GetMaxFramebufferWidth() const {
+        return properties.limits.maxFramebufferWidth;
+    }
+
+    /// Returns the maximum render area height.
+    u32 GetMaxFramebufferHeight() const {
+        return properties.limits.maxFramebufferHeight;
     }
 
     /// Returns the sample count flags supported by framebuffers.
@@ -329,6 +364,11 @@ public:
     /// Returns whether disabling primitive restart is supported.
     bool IsPrimitiveRestartDisableSupported() const {
         return driver_id != vk::DriverId::eMoltenvk;
+    }
+
+    /// Returns true if logic ops are supported by the device.
+    bool IsLogicOpSupported() const {
+        return features.logicOp;
     }
 
     /// Determines if a format is supported for a set of feature flags.
@@ -358,6 +398,7 @@ private:
     vk::PhysicalDeviceVulkan12Properties vk12_props;
     vk::PhysicalDevicePushDescriptorPropertiesKHR push_descriptor_props;
     vk::PhysicalDeviceFeatures features;
+    vk::PhysicalDeviceVulkan12Features vk12_features;
     vk::PhysicalDevicePortabilitySubsetFeaturesKHR portability_features;
     vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT dynamic_state_3_features;
     vk::PhysicalDeviceRobustness2FeaturesEXT robustness2_features;
@@ -377,13 +418,16 @@ private:
     u32 queue_family_index{0};
     bool custom_border_color{};
     bool fragment_shader_barycentric{};
+    bool amd_shader_explicit_vertex_parameter{};
     bool depth_clip_control{};
+    bool depth_clip_enable{};
     bool depth_range_unrestricted{};
     bool dynamic_state_3{};
     bool vertex_input_dynamic_state{};
     bool robustness2{};
     bool list_restart{};
     bool legacy_vertex_attributes{};
+    bool provoking_vertex{};
     bool shader_stencil_export{};
     bool image_load_store_lod{};
     bool amd_gcn_shader{};

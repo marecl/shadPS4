@@ -342,7 +342,7 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
         }
     }
 
-    // Limit the minumum address to SystemManagedVirtualBase to prevent hardware-specific issues.
+    // Limit the minimum address to SystemManagedVirtualBase to prevent hardware-specific issues.
     VAddr mapped_addr = (virtual_addr == 0) ? impl.SystemManagedVirtualBase() : virtual_addr;
 
     // Fixed mapping means the virtual address must exactly match the provided one.
@@ -414,9 +414,10 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
             rasterizer->MapMemory(mapped_addr, size);
         }
         *out_addr = impl.Map(mapped_addr, size, alignment, phys_addr, is_exec);
+
+        TRACK_ALLOC(*out_addr, size, "VMEM");
     }
 
-    TRACK_ALLOC(*out_addr, size, "VMEM");
     return ORBIS_OK;
 }
 
@@ -536,6 +537,7 @@ u64 MemoryManager::UnmapBytesFromEntry(VAddr virtual_addr, VirtualMemoryArea vma
         vma_base_size - start_in_vma < size ? vma_base_size - start_in_vma : size;
     const bool has_backing = type == VMAType::Direct || type == VMAType::File;
     const auto prot = vma_base.prot;
+    const bool readonly_file = prot == MemoryProt::CpuRead && type == VMAType::File;
 
     if (type == VMAType::Free) {
         return adjusted_size;
@@ -553,9 +555,8 @@ u64 MemoryManager::UnmapBytesFromEntry(VAddr virtual_addr, VirtualMemoryArea vma
     vma.phys_base = 0;
     vma.disallow_merge = false;
     vma.name = "";
-    const auto post_merge_it = MergeAdjacent(vma_map, new_it);
-    auto& post_merge_vma = post_merge_it->second;
-    bool readonly_file = post_merge_vma.prot == MemoryProt::CpuRead && type == VMAType::File;
+    MergeAdjacent(vma_map, new_it);
+
     if (type != VMAType::Reserved && type != VMAType::PoolReserved) {
         // If this mapping has GPU access, unmap from GPU.
         if (IsValidGpuMapping(virtual_addr, size)) {
@@ -630,6 +631,9 @@ s64 MemoryManager::ProtectBytes(VAddr addr, VirtualMemoryArea vma_base, u64 size
     if (True(prot & MemoryProt::CpuReadWrite)) {
         perms |= Core::MemoryPermission::ReadWrite;
     }
+    if (True(prot & MemoryProt::CpuExec)) {
+        perms |= Core::MemoryPermission::Execute;
+    }
     if (True(prot & MemoryProt::GpuRead)) {
         perms |= Core::MemoryPermission::Read;
     }
@@ -649,9 +653,9 @@ s32 MemoryManager::Protect(VAddr addr, u64 size, MemoryProt prot) {
     std::scoped_lock lk{mutex};
 
     // Validate protection flags
-    constexpr static MemoryProt valid_flags = MemoryProt::NoAccess | MemoryProt::CpuRead |
-                                              MemoryProt::CpuReadWrite | MemoryProt::GpuRead |
-                                              MemoryProt::GpuWrite | MemoryProt::GpuReadWrite;
+    constexpr static MemoryProt valid_flags =
+        MemoryProt::NoAccess | MemoryProt::CpuRead | MemoryProt::CpuReadWrite |
+        MemoryProt::CpuExec | MemoryProt::GpuRead | MemoryProt::GpuWrite | MemoryProt::GpuReadWrite;
 
     MemoryProt invalid_flags = prot & ~valid_flags;
     if (invalid_flags != MemoryProt::NoAccess) {
