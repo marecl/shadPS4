@@ -337,7 +337,7 @@
     </message>
     <message>
       <source>The update has been downloaded, press OK to install.</source>
-      <translation>Oppdateringen ble lastet ned, trykk OK for å installere.</translation>
+      <translation>Oppdateringen er lastet ned, trykk OK for å installere.</translation>
     </message>
     <message>
       <source>Failed to save the update file at</source>
@@ -454,32 +454,8 @@
       <translation>Bruk oppsett per spill</translation>
     </message>
     <message>
-      <source>L1 / LB</source>
-      <translation>L1 / LB</translation>
-    </message>
-    <message>
-      <source>L2 / LT</source>
-      <translation>L2 / LT</translation>
-    </message>
-    <message>
-      <source>Back</source>
-      <translation>Tilbake</translation>
-    </message>
-    <message>
-      <source>R1 / RB</source>
-      <translation>R1 / RB</translation>
-    </message>
-    <message>
-      <source>R2 / RT</source>
-      <translation>R2 / RT</translation>
-    </message>
-    <message>
       <source>L3</source>
       <translation>L3</translation>
-    </message>
-    <message>
-      <source>Options / Start</source>
-      <translation>Options / Start</translation>
     </message>
     <message>
       <source>R3</source>
@@ -488,22 +464,6 @@
     <message>
       <source>Face Buttons</source>
       <translation>Handlingsknapper</translation>
-    </message>
-    <message>
-      <source>Triangle / Y</source>
-      <translation>Triangel / Y</translation>
-    </message>
-    <message>
-      <source>Square / X</source>
-      <translation>Firkant / X</translation>
-    </message>
-    <message>
-      <source>Circle / B</source>
-      <translation>Sirkel / B</translation>
-    </message>
-    <message>
-      <source>Cross / A</source>
-      <translation>Kryss / A</translation>
     </message>
     <message>
       <source>Right Stick Deadzone (def:2, max:127)</source>
@@ -535,7 +495,7 @@
     </message>
     <message>
       <source>Override Lightbar Color</source>
-      <translation>Overstyr farge på lyslinja</translation>
+      <translation>Overstyr farge på lyslisten</translation>
     </message>
     <message>
       <source>Override Color</source>
@@ -564,6 +524,74 @@
     <message>
       <source>Cancel</source>
       <translation>Avbryt</translation>
+    </message>
+    <message>
+      <source>unmapped</source>
+      <translation>Ikke tildelt</translation>
+    </message>
+    <message>
+      <source>L1</source>
+      <translation>L1</translation>
+    </message>
+    <message>
+      <source>R1</source>
+      <translation>R1</translation>
+    </message>
+    <message>
+      <source>L2</source>
+      <translation>L2</translation>
+    </message>
+    <message>
+      <source>Options</source>
+      <translation>Options</translation>
+    </message>
+    <message>
+      <source>R2</source>
+      <translation>R2</translation>
+    </message>
+    <message>
+      <source>Touchpad Left</source>
+      <translation>Venstre berøringsplate</translation>
+    </message>
+    <message>
+      <source>Touchpad Center</source>
+      <translation>Midt berøringsplate</translation>
+    </message>
+    <message>
+      <source>Touchpad Right</source>
+      <translation>Høyre berøringsplate</translation>
+    </message>
+    <message>
+      <source>Triangle</source>
+      <translation>Triangel</translation>
+    </message>
+    <message>
+      <source>Square</source>
+      <translation>Firkant</translation>
+    </message>
+    <message>
+      <source>Circle</source>
+      <translation>Sirkel</translation>
+    </message>
+    <message>
+      <source>Cross</source>
+      <translation>Kryss</translation>
+    </message>
+    <message>
+      <source>Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</source>
+      <translation>Kan ikke tildele samme inndata mer enn én gang. Dupliserte inndata tildeles følgende taster:
+
+%1</translation>
+    </message>
+    <message>
+      <source>Press a button</source>
+      <translation>Trykk på en knapp</translation>
+    </message>
+    <message>
+      <source>Move analog stick</source>
+      <translation>Flytt på analog stikke</translation>
     </message>
   </context>
   <context>
@@ -747,6 +775,10 @@
     <message>
       <source>Last updated</source>
       <translation>Sist oppdatert</translation>
+    </message>
+    <message>
+      <source>Favorite</source>
+      <translation>Favoritter</translation>
     </message>
   </context>
   <context>
@@ -950,6 +982,14 @@
       <source>SFO Viewer for </source>
       <translation>SFO-viser for </translation>
     </message>
+    <message>
+      <source>Remove from Favorites</source>
+      <translation>Fjern fra favoritter</translation>
+    </message>
+    <message>
+      <source>Add to Favorites</source>
+      <translation>Legg til i favoritter</translation>
+    </message>
   </context>
   <context>
     <name>HelpDialog</name>
@@ -990,7 +1030,7 @@
     </message>
     <message>
       <source>unmapped</source>
-      <translation>Ikke satt opp</translation>
+      <translation>Ikke tildelt</translation>
     </message>
     <message>
       <source>Left</source>
@@ -1057,10 +1097,6 @@
       <translation>L3</translation>
     </message>
     <message>
-      <source>Touchpad Click</source>
-      <translation>Berøringsplateknapp</translation>
-    </message>
-    <message>
       <source>Mouse to Joystick</source>
       <translation>Mus til styrespak</translation>
     </message>
@@ -1082,7 +1118,7 @@
     </message>
     <message>
       <source>note: click Help Button/Special Keybindings for more information</source>
-      <translation>Merk: Trykk på hjelpeknappen for mer informasjon</translation>
+      <translation>Merk: Trykk på «Hjelp»-knappen for mer informasjon</translation>
     </message>
     <message>
       <source>Face Buttons</source>
@@ -1153,10 +1189,6 @@
       <translation>Klarte ikke lagre</translation>
     </message>
     <message>
-      <source>Cannot bind any unique input more than once</source>
-      <translation>Kan ikke tildele unike oppsett mer enn en gang</translation>
-    </message>
-    <message>
       <source>Press a key</source>
       <translation>Trykk på en tast</translation>
     </message>
@@ -1183,6 +1215,26 @@
     <message>
       <source>Cancel</source>
       <translation>Avbryt</translation>
+    </message>
+    <message>
+      <source>Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</source>
+      <translation>Kan ikke tildele samme inndata mer enn én gang. Dupliserte inndata tildeles følgende taster:
+
+%1</translation>
+    </message>
+    <message>
+      <source>Touchpad Left</source>
+      <translation>Venstre berøringsplate</translation>
+    </message>
+    <message>
+      <source>Touchpad Center</source>
+      <translation>Midt berøringsplate</translation>
+    </message>
+    <message>
+      <source>Touchpad Right</source>
+      <translation>Høyre berøringsplate</translation>
     </message>
   </context>
   <context>
@@ -1253,11 +1305,11 @@
     </message>
     <message>
       <source>List View</source>
-      <translation>Liste-visning</translation>
+      <translation>Listevisning</translation>
     </message>
     <message>
       <source>Grid View</source>
-      <translation>Rute-visning</translation>
+      <translation>Rutenettvisning</translation>
     </message>
     <message>
       <source>Elf Viewer</source>
@@ -1346,10 +1398,6 @@
     <message>
       <source>Game List</source>
       <translation>Spilliste</translation>
-    </message>
-    <message>
-      <source> * Unsupported Vulkan Version</source>
-      <translation> * Ustøttet Vulkan-versjon</translation>
     </message>
     <message>
       <source>Download Cheats For All Installed Games</source>
@@ -1545,10 +1593,6 @@
     <message>
       <source>Controller</source>
       <translation>Kontroller</translation>
-    </message>
-    <message>
-      <source>Back Button Behavior</source>
-      <translation>Tilbakeknapp atferd</translation>
     </message>
     <message>
       <source>Graphics</source>
@@ -1760,7 +1804,7 @@
     </message>
     <message>
       <source>Log Filter:\nFilters the log to only print specific information.\nExamples: &quot;Core:Trace&quot; &quot;Lib.Pad:Debug Common.Filesystem:Error&quot; &quot;*:Critical&quot;\nLevels: Trace, Debug, Info, Warning, Error, Critical - in this order, a specific level silences all levels preceding it in the list and logs every level after it.</source>
-      <translation>Loggfilter:\nFiltrerer loggen for å kun skrive ut spesifikk informasjon.\nEksempler: &quot;Core:Trace&quot; &quot;Lib.Pad:Debug Common.Filesystem:Error&quot; &quot;*:Critical&quot; \nNivåer: Trace, Debug, Info, Warning, Error, Critical - i denne rekkefølgen, et spesifikt nivå demper alle tidligere nivåer i lista og loggfører alle nivåer etter det.</translation>
+      <translation>Loggfilter:\nFiltrerer loggen for å kun skrive ut spesifikk informasjon.\nEksempler: «Core:Trace» «Lib.Pad:Debug Common.Filesystem:Error» «*:Critical» \nNivåer: Trace, Debug, Info, Warning, Error, Critical - i denne rekkefølgen, et spesifikt nivå demper alle tidligere nivåer i lista og loggfører alle nivåer etter det.</translation>
     </message>
     <message>
       <source>Update:\nRelease: Official versions released every month that may be very outdated, but are more reliable and tested.\nNightly: Development versions that have all the latest features and fixes, but may contain bugs and are less stable.</source>
@@ -1787,12 +1831,8 @@
       <translation>Sett en tid for når musepekeren forsvinner etter å ha vært inaktiv.</translation>
     </message>
     <message>
-      <source>Back Button Behavior:\nSets the controller&apos;s back button to emulate tapping the specified position on the PS4 touchpad.</source>
-      <translation>Atferd for tilbaketasten:\nSetter tilbaketasten på kontrolleren til å imitere et trykk på den angitte posisjonen på PS4s berøringsplate.</translation>
-    </message>
-    <message>
       <source>Display Compatibility Data:\nDisplays game compatibility information in table view. Enable &quot;Update Compatibility On Startup&quot; to get up-to-date information.</source>
-      <translation>Vis kompatibilitets-data:\nViser informasjon om spillkompatibilitet i tabellvisning. Bruk &quot;Oppdater kompatibilitets-data ved oppstart&quot; for oppdatert informasjon.</translation>
+      <translation>Vis kompatibilitets-data:\nViser informasjon om spillkompatibilitet i tabellvisning. Bruk «Oppdater database ved oppstart» for oppdatert informasjon.</translation>
     </message>
     <message>
       <source>Update Compatibility On Startup:\nAutomatically update the compatibility database when shadPS4 starts.</source>
@@ -1815,24 +1855,8 @@
       <translation>Alltid</translation>
     </message>
     <message>
-      <source>Touchpad Left</source>
-      <translation>Berøringsplate venstre</translation>
-    </message>
-    <message>
-      <source>Touchpad Right</source>
-      <translation>Berøringsplate høyre</translation>
-    </message>
-    <message>
-      <source>Touchpad Center</source>
-      <translation>Berøringsplate midten</translation>
-    </message>
-    <message>
-      <source>None</source>
-      <translation>Ingen</translation>
-    </message>
-    <message>
       <source>Graphics Device:\nOn multiple GPU systems, select the GPU the emulator will use from the drop down list,\nor select &quot;Auto Select&quot; to automatically determine it.</source>
-      <translation>Grafikkenhet:\nSystemer med flere GPU-er, kan emulatoren velge hvilken enhet som skal brukes fra rullegardinlista,\neller velg &quot;Velg automatisk&quot;.</translation>
+      <translation>Grafikkenhet:\nSystemer med flere GPU-er, kan emulatoren velge hvilken enhet som skal brukes fra rullegardinlista,\neller bruk «Velg automatisk».</translation>
     </message>
     <message>
       <source>Width/Height:\nSets the size of the emulator window at launch, which can be resized during gameplay.\nThis is different from the in-game resolution.</source>
@@ -2049,6 +2073,10 @@
     <message>
       <source>Open the custom trophy images/sounds folder:\nYou can add custom images to the trophies and an audio.\nAdd the files to custom_trophy with the following names:\ntrophy.wav OR trophy.mp3, bronze.png, gold.png, platinum.png, silver.png\nNote: The sound will only work in QT versions.</source>
       <translation>Åpne mappa med tilpassede bilder og lyder for trofé:\nDu kan legge til tilpassede bilder til trofeer og en lyd.\nLegg filene til custom_trophy med følgende navn:\ntrophy.wav ELLER trophy.mp3, bronze.png, gold.png, platinum.png, silver.png\nMerk: Lyden avspilles kun i Qt-versjonen.</translation>
+    </message>
+    <message>
+      <source> * Unsupported Vulkan Version</source>
+      <translation> *Ustøttet Vulkan-versjon</translation>
     </message>
   </context>
   <context>
