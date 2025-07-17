@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <unordered_map>
-
 #include "common/types.h"
 
 namespace Libraries::Kernel {

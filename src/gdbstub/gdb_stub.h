@@ -22,18 +22,14 @@ using ThreadID = pthread_t;
 
 namespace Core::Devtools {
 
-void handle_sigterm(int sig);
-
 class GdbStub {
-
 public:
-    explicit GdbStub(u16 port, pid_t parent);
+    explicit GdbStub(u16 port, pid_t parent, GdbDataType::SharedVector* shared);
     ~GdbStub();
-    bool InitShared();
+    bool Run();
 
-    void Run();
+    std::string BuildThreadList();
 
-std::string BuildThreadList();
 private:
     GdbDataType::SharedVector* shd;
 
@@ -46,9 +42,9 @@ private:
         Interrupt = '\03',
     };
 
-    ThreadID selectedThread;
+    GdbDataType::ThreadInfo* selectedThread;
 
-    pid_t pid_parent;
+    pid_t pid_target;
     pid_t pid_self;
     u16 m_port;
     int m_socket{};
@@ -66,9 +62,9 @@ private:
     static GdbCommand ParsePacket(const std::string& data);
     bool HandleIncomingData(const int client);
     static GdbStub::GdbCommand HandleCommand(const GdbCommand& command);
-
-
-    static std::string dumpRegistersFromThread(ThreadID threadID);
+    GdbDataType::ThreadInfo* getThreadHandleFromString(const std::string& data);
+    std::string GdbStub::dumpRegistersFromThread(struct user_regs_struct regs,
+                                                 struct user_fpregs_struct fpregs);
     std::string MakeResponse(const std::string& response);
     std::string handler(const GdbCommand& command);
     std::string handle_v_packet(const GdbCommand& command);

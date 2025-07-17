@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <format>
 #include <iostream>
+#include <string>
 #include <fmt/xchar.h>
-#include <magic_enum/magic_enum_utility.hpp>
 #include <netinet/in.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
@@ -14,6 +15,7 @@
 #include "common/logging/log.h"
 
 #include <pthread.h>
+#include <sys/user.h>
 #include "common/assert.h"
 #include "common/debug.h"
 #include "core/debug_state.h"
@@ -22,26 +24,14 @@
 #include "core/memory.h"
 #include "core/thread.h"
 #include "gdb_stub.h"
+#include "threadlistutil.h"
 
 using namespace ::Libraries::Kernel;
 
 namespace Core::Devtools {
 
-static std::atomic<bool> g_stop_requested = false;
-
-void handle_sigterm(int sig) {
-    g_stop_requested.store(true);
-}
-
 constexpr auto OK = "OK";
 constexpr auto E01 = "E01";
-
-static const std::vector<std::tuple<u8, std::string>> GPRegister = {
-    {REG_RAX, "RAX"}, {REG_RBX, "RBX"}, {REG_RCX, "RCX"},    {REG_RDX, "RDX"}, {REG_RSI, "RSI"},
-    {REG_RDI, "RDI"}, {REG_RBP, "RBP"}, {REG_RSP, "RSP"},    {REG_R8, "R8"},   {REG_R9, "R9"},
-    {REG_R10, "R10"}, {REG_R11, "R11"}, {REG_R12, "R12"},    {REG_R13, "R13"}, {REG_R14, "R14"},
-    {REG_R15, "R15"}, {REG_RIP, "RIP"}, {REG_EFL, "EFLAGS"},
-};
 
 constexpr char target_description[] = R"(l<?xml version="1.0"?>
 <!DOCTYPE target SYSTEM "gdb-target.dtd">
@@ -49,25 +39,17 @@ constexpr char target_description[] = R"(l<?xml version="1.0"?>
   <architecture>i386:x86-64</architecture>
 </target>)";
 
-GdbStub::GdbStub(const u16 port, pid_t parent)
-    : m_port(port), pid_parent(parent), pid_self(getpid()) {
+GdbStub::GdbStub(const u16 port, pid_t target, GdbDataType::SharedVector* shared)
+    : m_port(port), pid_target(target), pid_self(getpid()) {
     Common::Log::Initialize("debug.log");
     Common::Log::Start();
     CreateSocket();
 
     selectedThread = 0;
+    shd = shared;
 }
 
 GdbStub::~GdbStub() {}
-
-bool GdbStub::InitShared() {
-    shd = GdbData.thread_shared();
-
-    if (shd != nullptr)
-        return true;
-    LOG_DEBUG(Debug, "Can't initialize shared memory for gdb");
-    return false;
-}
 
 void GdbStub::CreateSocket() {
     m_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -80,6 +62,7 @@ void GdbStub::CreateSocket() {
 
     ASSERT_MSG(bind(m_socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != -1,
                "Failed to bind socket ({})", strerror(errno));
+    std::cout << "GDB stub listening on port " << m_port << std::endl;
 }
 
 GdbStub::GdbCommand GdbStub::ParsePacket(const std::string& data) {
@@ -192,16 +175,16 @@ std::string GdbStub::BuildThreadList() {
 
     std::string buffer;
     buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
+    LOG_WARNING(Debug, "Thread count: {}", shd->size);
 
     for (u8 i = 0; i < shd->size; i++) {
-        ThreadID tid = shd->data[i];
-        u32 tid_enc = 1 + ((~tid) & 0x7FFFFFFF);
-        char _rawName[128];
-        pthread_getname_np(tid, _rawName, 128);
-        std::string name = std::string(_rawName);
+        struct GdbDataType::ThreadInfo* thrd = &shd->threads[i];
+
+        LOG_WARNING(Debug, "\tID: {:x}\tEncID: {:x}\tName: {}", thrd->tid, thrd->tid_enc,
+                    std::string(thrd->name));
 
         buffer += fmt::format("    <thread id=\"{:x}\" name=\"{}\" handle=\"{:x}\"></thread>\n",
-                              tid_enc, name, tid);
+                              thrd->tid_enc, std::string(thrd->name), thrd->tid);
     }
 
     buffer += "</threads>";
@@ -234,7 +217,9 @@ std::string GdbStub::handler(const GdbCommand& command) {
          * 1) we are 100% sure we're in a known state
          * 2) paused threads dumped their contexts
          * */
-        DebugState.PauseGuestThreads();
+        ptrace(PTRACE_ATTACH, pid_target, nullptr, nullptr);
+        waitpid(pid_target, nullptr, 0);
+
         return "S0A";
 
     case 'c':
@@ -248,7 +233,7 @@ std::string GdbStub::handler(const GdbCommand& command) {
     // the problem is, that gdb expects the main thread to be active
     // so i need to figure out how to address GAME_MainThread
     case 'g':
-        return dumpRegistersFromThread(selectedThread);
+        // return dumpRegistersFromThread(selectedThread);
         break; // read general registers
     case 'G':
         break; // write general registers
@@ -290,18 +275,8 @@ std::string GdbStub::handler(const GdbCommand& command) {
     return NIMPL(command.cmd);
 }
 
-ThreadID getThreadByName(std::string name) {
-    for (GdbDataType::thread_list_item_t& thr : GdbData.thread_get_list()) {
-        if (std::get<0>(thr) == name)
-            return std::get<1>(thr);
-    }
-    return 0;
-}
-
-ThreadID getThreadHandleFromString(const std::string& data) {
-    ThreadID out = std::strtoull(data.c_str(), NULL, 16);
-
-    return out;
+ThreadInfo* GdbStub::getThreadHandleFromString(const std::string& data) {
+    return getThreadByID(shd, std::strtoull(data.c_str(), NULL, 16));
 }
 
 std::string GdbStub::handle_H_packet(const GdbCommand& command) {
@@ -314,36 +289,46 @@ std::string GdbStub::handle_H_packet(const GdbCommand& command) {
     case 'c':
         // could be as encoded
         if (command.arg == "-1" || command.arg == "0") {
-            selectedThread = getThreadByName(GAME_MAIN_THREAD_NAME);
-            LOG_ERROR(Debug, "Main thread selected: {:x}", selectedThread);
+            selectedThread = getThreadByName(shd, GAME_MAIN_THREAD_NAME);
+            LOG_ERROR(Debug, "Main thread selected: {:x}", selectedThread->tid);
             return OK;
         }
-        selectedThread = getThreadHandleFromString(command.arg);
-        LOG_ERROR(Debug, "Selected thread: {:x}", selectedThread);
+        selectedThread = getThreadByID(shd, string2tid(command.arg));
+        LOG_ERROR(Debug, "Selected thread: {:x}", selectedThread->tid);
         return OK;
+        break;
     case 'g':
-        ThreadID target = 0;
+        ThreadInfo* target = nullptr;
         if (command.arg == "0")
-            target = getThreadByName(GAME_MAIN_THREAD_NAME);
+            target = getThreadByName(shd, GAME_MAIN_THREAD_NAME);
         else if (command.arg == "-1")
             target = selectedThread;
-        else
-            target = GdbData.thread_decode_id(std::stoi(command.arg, NULL, 16));
-        if (target == 0) {
-            LOG_ERROR(Debug, "Attempting to dump nonexistent thread: {:x}", target);
-            return "E.Thread doesn't exist";
+        else {
+            ThreadID ttt = string2tid(command.arg);
+            target = getThreadByEncodedID(shd, ttt);
+            if (target == nullptr) {
+                LOG_ERROR(Debug, "Attempting to dump nonexistent thread: {:x}", ttt);
+                return "E.Thread doesn't exist";
+            }
         }
+        kill(this->pid_target, SIGSTOP);
 
-        if (DebugState.IsGuestThreadsPaused()) {
-            GdbData.thread_resume(target);
-            GdbData.thread_pause(target);
-        } else {
-            GdbData.thread_pause(target);
+        for (u16 idx = 0; idx < shd->size; shd++) {
+            ThreadInfo* thd = &shd->threads[idx];
+            int status = 0;
+            waitpid(thd->tid, &status, __WALL);
+            if (!WIFSTOPPED(status)) {
+                LOG_ERROR(Debug, "wątek {:x} ({}) nie jest zatrzymany\n", thd->tid, thd->name);
+            }
         }
-        GdbData.thread_resume(target);
-        LOG_ERROR(Debug, "Dumping thread registers: {} ({:x})", GdbData.getThreadName(target),
-                  target);
-        return dumpRegistersFromThread(target);
+        struct user_regs_struct regs;
+        struct user_fpregs_struct fpregs;
+        ptrace(PTRACE_GETREGS, target, nullptr, &regs);
+        ptrace(PTRACE_GETFPREGS, target, nullptr, &fpregs);
+
+        LOG_ERROR(Debug, "Dumping thread registers: {} ({:x})", target->name, target->tid);
+        return dumpRegistersFromThread(regs,fpregs);
+        break;
     }
 
     return NIMPL(command.cmd);
@@ -405,12 +390,9 @@ std::string GdbStub::handle_q_packet(const GdbCommand& command) {
     if (command.cmd == "qTStatus") {
         LOG_WARNING(Debug, "qTStatus probably stubbed");
         return "T1;tstop:0";
-        //  we're not tracing execution. yet.
-        //  skip this because it throws an error for some reason
-        // return "T0;tnotrun:0";
     }
     if (command.cmd == "qC") {
-        return std::format("{:x}", selectedThread);
+        return std::format("{:x}", selectedThread->tid);
     }
     if (command.cmd == "qXfer") {
 
@@ -426,14 +408,14 @@ std::string GdbStub::handle_q_packet(const GdbCommand& command) {
         }
     }
     if (command.cmd == "qfThreadInfo") {
-        ThreadID mainThread = getThreadByName(GAME_MAIN_THREAD_NAME);
-        u32 mainThreadEncoded = GdbData.thread_encode_id(mainThread);
+        ThreadInfo* mainThread = getThreadByName(shd, GAME_MAIN_THREAD_NAME);
+        u32 mainThreadEncoded = mainThread->tid_enc;
         return std::format("m {:x}", mainThreadEncoded);
         // send MAIN THREAD!!! m thread-id
     }
     if (command.cmd == "qsThreadInfo") {
         std::string out = "m";
-        ThreadID mainThread = getThreadByName(GAME_MAIN_THREAD_NAME); // skip this one
+        /*ThreadID mainThread = getThreadByName(GAME_MAIN_THREAD_NAME); // skip this one
         GdbDataType::thread_list_t list = GdbData.thread_get_list();
         for (const auto& [name, tid, encid] : list) {
             if (tid == mainThread)
@@ -441,7 +423,7 @@ std::string GdbStub::handle_q_packet(const GdbCommand& command) {
             out += std::format("{:x},", tid);
         }
         out[out.length() - 1] = 'l';
-        return out;
+        return out;*/
         // send remaining threads! m tid,tid.. l (male l - koniec listy)
     }
     if (command.cmd == "qTfV") {
@@ -456,37 +438,6 @@ std::string GdbStub::handle_q_packet(const GdbCommand& command) {
 
     return NIMPL(command.cmd);
 }
-
-/*
-std::string GdbStub::HandleCommand(const GdbCommand& command) {
-    LOG_INFO(Debug, "command.cmd = {} | command.arg = {}", command.cmd, command.raw_data);
-
-    ucontext_t* ctx = &selectedCtx;
-    if (selectedThread != 0) {
-        selectedCtx = wwe[selectedThread];
-
-        std::string out = "";
-        u8 bfr[32];
-        memcpy(bfr, ctx->uc_stack.ss_sp - 32, 32);
-
-        for (u8 i = 0; i < 32; i++)
-            out += std::format("{:02x} ", bfr[i]);
-        LOG_INFO(Debug, "{:x} -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: {:x}",
-                 reinterpret_cast<u64>(selectedThread), ctx->uc_mcontext.gregs[REG_RIP],
-                 ctx->uc_mcontext.gregs[REG_RDI], ctx->uc_mcontext.gregs[REG_RSI],
-                 ctx->uc_mcontext.gregs[REG_RBP], ctx->uc_mcontext.gregs[REG_RBX]);
-        LOG_INFO(Debug, "\t->Stack Dump: {}", out);
-    }
-
-    if (const auto it = command_table.find(command.cmd); it != command_table.end()) {
-        return it->second();
-    }
-
-    LOG_ERROR(Debug, "Unhandled command '{}'", command.cmd);
-    return vMustReplyEmpty ? "" : E01;
-}*/
-#include <format>
-#include <string>
 
 std::string byteSwapString(std::string data, u8 width) {
     std::string out = "";
@@ -504,8 +455,9 @@ std::string byteSwap(u64 regval, u8 width = 16) {
     return byteSwapString(regValStr, width);
 }
 
-std::string GdbStub::dumpRegistersFromThread(ThreadID threadID) {
-    u64 value = 0;
+std::string GdbStub::dumpRegistersFromThread(struct user_regs_struct regs,struct user_fpregs_struct fpregs) {
+    return "";
+    /*u64 value = 0;
 
     std::string regs = "";
 
@@ -551,17 +503,21 @@ std::string GdbStub::dumpRegistersFromThread(ThreadID threadID) {
         }
     }
     return regs;
+    */
 }
 
-void GdbStub::Run() {
-    std::cout << "GDB stub listening on port " << m_port << std::endl;
-
-    if (listen(m_socket, 1) == -1) {
-        LOG_ERROR(Debug, "Failed to listen on socket ({})", strerror(errno));
-        return;
+bool GdbStub::Run() {
+    if (GdbData.thread_shared() == nullptr) {
+        LOG_ERROR(Debug, "Invalid thread buffer");
+        return false;
     }
 
-    while (!g_stop_requested.load()) {
+    if (listen(m_socket, 1) == -1) {
+        std::cout << "Failed to listen on socket (" << strerror(errno) << ")" << std::endl;
+        return false;
+    }
+
+    while (true) {
         sockaddr_in client_addr{};
         socklen_t client_addr_len = sizeof(client_addr);
         const int client =
@@ -572,14 +528,8 @@ void GdbStub::Run() {
         }
 
         LOG_INFO(Debug, "Client {} connected", client);
-        LOG_INFO(Debug, "{}", BuildThreadList());
-        // if (ptrace(PTRACE_ATTACH, this->spid, nullptr, nullptr) == -1) {
-        //     perror("ptrace attach");
-        //     return;
-        //  }
-        // waitpid(this->spid, nullptr, 0);  // czekaj na SIGSTOP
 
-        while (!g_stop_requested.load()) {
+        while (true) {
             if (!HandleIncomingData(client)) {
                 // LOG_ERROR(Debug, "Failed to handle incoming data");
             }
@@ -589,6 +539,7 @@ void GdbStub::Run() {
     close(m_socket);
 
     LOG_DEBUG(Debug, "Stub exited");
+    return true;
 }
 
 } // namespace Core::Devtools

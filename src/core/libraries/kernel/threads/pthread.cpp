@@ -4,7 +4,6 @@
 #include "common/assert.h"
 #include "common/thread.h"
 #include "core/debug_state.h"
-#include "gdbstub/gdb_data.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads.h"
@@ -211,12 +210,10 @@ static void RunThread(void* arg) {
 
     /* Run the current thread's start routine with argument: */
     curthread->native_thr.Initialize();
-
     void* ret = Core::ExecuteGuest(curthread->start_routine, curthread->arg);
 
     /* Remove thread from tracking */
     DebugState.RemoveCurrentThreadFromGuestList();
-
     posix_pthread_exit(ret);
 }
 

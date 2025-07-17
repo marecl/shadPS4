@@ -17,12 +17,39 @@ std::mutex GdbDataImpl::thread_list_mutex;
 std::vector<thread_meta_t> GdbDataImpl::thread_list;
 std::vector<loadable_info_t> GdbDataImpl::loaded_binaries;
 
-std::unordered_map<ThreadID, ucontext_t> GdbDataImpl::ctx_dumps;
-std::unordered_map<ThreadID, std::mutex> GdbDataImpl::ctx_dump_mutex;
+SharedVector* GdbDataImpl::thread_shared() {
+    return shared;
+}
+
+void GdbDataImpl::thread_rebuild() {
+    // don't mutex, it's invoked by register/unregister which already claims it
+    u16 idx = 0;
+
+    for (auto& [tid, tid_enc] : GdbDataImpl::thread_list) {
+        ThreadInfo* thd = &(shared->threads[idx++]);
+        thd->tid = tid;
+        thd->tid_enc = tid_enc;
+        strncpy(thd->name, getThreadName(tid).c_str(), 16);
+        thd->name[15] = 0;
+
+        LOG_WARNING(Debug, "\tID: {:x}\tEncID: {:x}\tName: {}", thd->tid, thd->tid_enc,
+                    std::string(thd->name));
+
+        if (idx >= MAX_REGISTERED_THREADS) {
+            LOG_CRITICAL(
+                Debug,
+                "There are {} threads. Congratulations. I hereby revoke your debugging privileges.",
+                MAX_REGISTERED_THREADS);
+            memset(0,0xDEADBEEF,0xFFFFFFFFFFFFFFFF);
+            break;
+        }
+    }
+    shared->size = idx;
+}
 
 std::string GdbDataImpl::getThreadName(ThreadID tid) {
-    char _rawName[128];
-    pthread_getname_np(tid, _rawName, 128);
+    char _rawName[16];
+    pthread_getname_np(tid, _rawName, 16);
     return std::string(_rawName);
 }
 
@@ -30,16 +57,8 @@ void GdbDataImpl::thread_register(ThreadID tid) {
     std::lock_guard lock{GdbDataImpl::thread_list_mutex};
     const u32 tid_encoded = 1 + ((~tid) & 0x7FFFFFFF);
     GdbDataImpl::thread_list.push_back(thread_meta_t(tid, tid_encoded));
-    update_shd();
     LOG_INFO(Debug, "Thread registered: {} ({:x} -> {:x})", getThreadName(tid), tid, tid_encoded);
-}
-
-void GdbDataImpl::update_shd() {
-    u8 idx = 0;
-    for (auto& [tid, _] : GdbDataImpl::thread_list) {
-        shared->data[idx++] = tid;
-    }
-    shared->size = idx;
+    thread_rebuild();
 }
 
 void GdbDataImpl::thread_unregister(ThreadID tid) {
@@ -47,44 +66,35 @@ void GdbDataImpl::thread_unregister(ThreadID tid) {
 
     if (std::erase_if(thread_list, [&](const auto& v) { return std::get<0>(v) == tid; }) == 1) {
         LOG_INFO(Debug, "Unregistered thread: {:x}", tid);
-        update_shd();
+        thread_rebuild();
         return;
     }
     LOG_INFO(Debug, "Failed to unregister thread: {:x}", tid);
     return;
 }
 
-void GdbDataImpl::thread_pause(ThreadID pid) {
+void GdbDataImpl::thread_pause(ThreadID tid) {
 // check if running
 #ifdef _WIN32
-    auto handle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, pid);
+    auto handle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, tid);
     SuspendThread(handle);
     CloseHandle(handle);
 #else
-    pthread_kill(pid, SIGUSR1);
+    pthread_kill(tid, SIGUSR1);
 #endif
     return;
 }
 
-void GdbDataImpl::thread_resume(ThreadID pid) {
+void GdbDataImpl::thread_resume(ThreadID tid) {
 // check if running
 #ifdef _WIN32
-    auto handle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, pid);
+    auto handle = OpenThread(THREAD_SUSPEND_RESUME, FALSE, tid);
     ResumeThread(handle);
     CloseHandle(handle);
 #else
-    pthread_kill(pid, SIGUSR1);
+    pthread_kill(tid, SIGUSR1);
 #endif
     return;
-}
-
-thread_list_t GdbDataImpl::thread_get_list(void) {
-    thread_list_t out;
-
-    for (auto& [tid, encid] : GdbDataImpl::thread_list) {
-        out.emplace_back(getThreadName(tid), tid, encid);
-    }
-    return out;
 }
 
 ThreadID GdbDataImpl::thread_decode_id(u32 encID) {
@@ -156,29 +166,7 @@ void GdbDataImpl::thread_pause_all(ThreadID pause_me_last,
     return;
 }
 
-void GdbDataImpl::thread_dump_ctx(ThreadID tid, void* ucontext) {
-    std::unique_lock<std::mutex> lock(GdbDataImpl::ctx_dump_mutex[tid]);
-    std::memcpy(&GdbDataImpl::ctx_dumps[tid], ucontext, sizeof(ucontext_t));
-}
-
-ucontext_t GdbDataImpl::thread_get_ctx(ThreadID tid) {
-    std::unique_lock<std::mutex> lock(GdbDataImpl::ctx_dump_mutex[tid]);
-    return GdbDataImpl::ctx_dumps[tid];
-}
-
-// Name, original ID, short/encoded ID
-/*std::vector<thread_list_entry_t> GdbDataImpl::thread_list(void) {
-    std::vector<std::tuple<std::string, u64, u32>> out;
-
-    for (auto& meta : thread_list) {
-
-        out.emplace_back(std::get<1>(meta), pid, std::get<1>(meta));
-    }
-
-    return out;
-}*/
-
-void GdbDataImpl::loadable_register(u64 base_addr, u64 size, std::string name) {
+/*void GdbDataImpl::loadable_register(u64 base_addr, u64 size, std::string name) {
     loadable_info_t entry(base_addr, size, name);
     loaded_binaries.emplace_back(entry);
     LOG_INFO(Debug, "Loadable registered: {} ({:x} len:{:x})", name, base_addr, size);
@@ -203,31 +191,4 @@ void GdbDataImpl::loadable_register(u64 base_addr, u64 size, std::string name) {
 void GdbDataImpl::loadable_unregister() {
     LOG_WARNING(Debug, "If you see this we're fucked (this function is never called)");
 }
-
-void ctx_dump_handler(int sig, siginfo_t* si, void* ucontext) {
-
-    ThreadID this_id = pthread_self();
-    GdbDataImpl::thread_dump_ctx(this_id, ucontext);
-    // more dramatic but visible
-    // LOG_ERROR(Debug, "CTX handler reached: {:x}", this_id);
-
-    // can be removed, just to make sure we're not collecting garbage
-    // also to verify that ghidra gets correct information
-#define STACK_DUMP_SIZE 32
-    ucontext_t ctx = GdbDataImpl::thread_get_ctx(this_id);
-    std::string out = "";
-    u8 bfr[STACK_DUMP_SIZE];
-    memcpy(bfr, reinterpret_cast<u8*>(ctx.uc_stack.ss_sp) - STACK_DUMP_SIZE, STACK_DUMP_SIZE);
-
-    for (u8 i = 0; i < STACK_DUMP_SIZE; i++)
-        out += std::format("{:02x} ", bfr[i]);
-    LOG_INFO(Debug,
-             "{} ({:x}) -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: "
-             "{:x}\n\t->Stack Dump: {}",
-             GdbDataImpl::getThreadName(this_id), reinterpret_cast<u64>(this_id),
-             ctx.uc_mcontext.gregs[REG_RIP], ctx.uc_mcontext.gregs[REG_RDI],
-             ctx.uc_mcontext.gregs[REG_RSI], ctx.uc_mcontext.gregs[REG_RBP],
-             ctx.uc_mcontext.gregs[REG_RBX], out);
-
-    return;
-}
+*/

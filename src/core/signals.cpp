@@ -7,8 +7,6 @@
 #include "common/signal_context.h"
 #include "core/signals.h"
 
-#include "gdbstub/gdb_data.h"
-
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -97,8 +95,6 @@ static void SignalHandler(int sig, siginfo_t* info, void* raw_context) {
         }
         break;
     case SIGUSR1: { // Sleep thread until signal is received
-        ctx_dump_handler(sig, info, raw_context);
-
         sigset_t sigset;
         sigemptyset(&sigset);
         sigaddset(&sigset, SIGUSR1);

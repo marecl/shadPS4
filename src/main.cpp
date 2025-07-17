@@ -8,7 +8,6 @@
 #include "unordered_map"
 
 #include <fmt/core.h>
-#include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
 #include "common/config.h"
@@ -18,6 +17,7 @@
 #include "emulator.h"
 #include "gdbstub/gdb_data.h"
 #include "gdbstub/gdb_stub.h"
+#include <sys/ptrace.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -211,33 +211,32 @@ int main(int argc, char* argv[]) {
     }
 
     pid_t parentpid = getpid();
-    pid_t stubpid = fork();
+    pid_t target = fork();
 
-    if (stubpid == 0) {
+    // don't move this to forked process. plz.
+    auto sharedMem = GdbData.thread_shared();
+
+    if (target > 0) {
         prctl(PR_SET_NAME, "shadgdb", 0, 0);
-        signal(SIGKILL, Core::Devtools::handle_sigterm);
 
-        auto gdb_stub = Core::Devtools::GdbStub(13377, parentpid);
+        waitpid(target, nullptr, 0); // złap SIGSTOP
+        ptrace(PTRACE_CONT, target, nullptr, nullptr);
 
-        if (gdb_stub.InitShared()) {
-            gdb_stub.Run();
-        }
+        auto gdb_stub = Core::Devtools::GdbStub(13377, parentpid, sharedMem);
+        exit(gdb_stub.Run() ? 0 : -1);
     }
-    if (stubpid < 0) {
-        perror("fork");
-    }
-    if (stubpid > 0) {
+    if (target == 0) {
+        ptrace(PTRACE_TRACEME, 0, nullptr, nullptr);
+        raise(SIGSTOP);
+
         // Run the emulator with the resolved eboot path
-        //sleep(0.1);
-
         Core::Emulator emulator;
         emulator.Run(eboot_path, game_args);
     }
 
-    kill(stubpid, SIGTERM);
-
+    kill(target, SIGTERM);
     int status;
-    waitpid(stubpid, &status, 0);
+    waitpid(target, &status, 0);
 
     return 0;
 }
