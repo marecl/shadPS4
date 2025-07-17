@@ -640,10 +640,10 @@ set(DEV_TOOLS src/core/devtools/layer.cpp
               src/core/devtools/widget/shader_list.h
               src/core/devtools/widget/text_editor.cpp
               src/core/devtools/widget/text_editor.h
-              src/core/devtools/gdb/gdb_stub.cpp
-              src/core/devtools/gdb/gdb_stub.h
-              src/core/devtools/gdb/gdb_data.cpp
-              src/core/devtools/gdb/gdb_data.h
+              src/gdbstub/gdb_stub.cpp
+              src/gdbstub/gdb_stub.h
+              src/gdbstub/gdb_data.cpp
+              src/gdbstub/gdb_data.h
 )
 
 set(COMMON src/common/logging/backend.cpp

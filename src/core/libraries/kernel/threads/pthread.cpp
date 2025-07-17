@@ -4,7 +4,7 @@
 #include "common/assert.h"
 #include "common/thread.h"
 #include "core/debug_state.h"
-#include "core/devtools/gdb/gdb_data.h"
+#include "gdbstub/gdb_data.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/kernel/threads.h"

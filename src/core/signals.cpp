@@ -7,7 +7,7 @@
 #include "common/signal_context.h"
 #include "core/signals.h"
 
-#include "core/devtools/gdb/gdb_data.h"
+#include "gdbstub/gdb_data.h"
 
 #ifdef _WIN32
 #include <windows.h>

@@ -13,7 +13,7 @@
 
 #include "common/singleton.h"
 #include "common/types.h"
-#include "core/devtools/gdb/gdb_data.h"
+#include "gdbstub/gdb_data.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 
 #ifdef _WIN32

@@ -26,7 +26,6 @@
 #include "common/polyfill_thread.h"
 #include "common/scm_rev.h"
 #include "common/singleton.h"
-#include "core/devtools/gdb/gdb_stub.h"
 #include "core/devtools/widget/module_list.h"
 #include "core/file_format/psf.h"
 #include "core/file_format/trp.h"
@@ -313,8 +312,6 @@ void Emulator::Run(std::filesystem::path file, const std::vector<std::string> ar
 #endif
 
     linker->Execute(args);
-
-    auto gdb_stub = Devtools::GdbStub(13377);
 
     window->InitTimers();
     while (window->IsOpen()) {

@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <iostream>
 #include <thread>
 #include <ucontext.h>
+#include "gdb_data.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -20,16 +22,21 @@ using ThreadID = pthread_t;
 
 namespace Core::Devtools {
 
+void handle_sigterm(int sig);
+
 class GdbStub {
 
-
-
 public:
-    explicit GdbStub(u16 port);
-
+    explicit GdbStub(u16 port, pid_t parent);
     ~GdbStub();
+    bool InitShared();
 
+    void Run();
+
+std::string BuildThreadList();
 private:
+    GdbDataType::SharedVector* shd;
+
     // Taken from xenia
     enum class ControlCode : char {
         Ack = '+',
@@ -41,9 +48,10 @@ private:
 
     ThreadID selectedThread;
 
+    pid_t pid_parent;
+    pid_t pid_self;
     u16 m_port;
     int m_socket{};
-    std::jthread m_thread;
 
     // Taken from xenia
     struct GdbCommand {
@@ -53,12 +61,12 @@ private:
     };
 
     void CreateSocket();
-    void ReInit();
     static bool IsValidAddress(u64 address, u64 length);
     static bool ReadMemory(u64 address, u64 length, std::string* out);
     static GdbCommand ParsePacket(const std::string& data);
     bool HandleIncomingData(const int client);
     static GdbStub::GdbCommand HandleCommand(const GdbCommand& command);
+
 
     static std::string dumpRegistersFromThread(ThreadID threadID);
     std::string MakeResponse(const std::string& response);
@@ -69,8 +77,6 @@ private:
     std::string handle_Q_packet(const GdbCommand& command) {
         return "E.Stub";
     }
-
-    void Run(const std::stop_token& stop);
 };
 
 } // namespace Core::Devtools

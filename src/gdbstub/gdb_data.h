@@ -7,7 +7,9 @@
 #include <thread>
 #include <tuple>
 #include <unordered_map>
+#include <cstring>
 #include <vector>
+#include <sys/mman.h>
 #include <ucontext.h>
 #include "common/types.h"
 
@@ -30,6 +32,11 @@ struct Pthread;
 } // namespace Libraries::Kernel
 
 namespace GdbDataType {
+
+struct SharedVector {
+    size_t size;
+    ThreadID data[32];
+};
 
 typedef std::tuple<ThreadID, u32> thread_meta_t;
 typedef std::tuple<std::string, ThreadID, u32> thread_list_item_t;
@@ -58,6 +65,30 @@ using namespace ::Libraries::Kernel;
 class GdbDataImpl {
 
 public:
+    GdbDataImpl() {
+        shared =
+            static_cast<SharedVector*>(mmap(nullptr, sizeof(SharedVector), PROT_READ | PROT_WRITE,
+                                            MAP_SHARED | MAP_ANONYMOUS, -1, 0));
+        if (shared == MAP_FAILED) {
+            perror("mmap");
+            shared = nullptr;
+            return;
+        }
+
+        shared->size = 0;
+        memset(shared->data,0,128);
+        shared->data[0]=0xFF;
+    }
+    ~GdbDataImpl(){
+        munmap(shared, sizeof(SharedVector));
+    }
+
+    SharedVector* thread_shared() {
+        return shared;
+    }
+
+    void update_shd();
+
     /********** THREADS ***********/
     void thread_register(ThreadID pid);
     void thread_unregister(ThreadID pid);
@@ -87,6 +118,8 @@ public:
      */
     void loadable_register(u64 base_addr, u64 size, std::string name);
     void loadable_unregister();
+
+    struct SharedVector* shared;
 
 private:
     //  main list mutex

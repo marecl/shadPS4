@@ -14,7 +14,7 @@
 #include "core/memory.h"
 #include "core/module.h"
 #include "core/tls.h"
-#include "devtools/gdb/gdb_data.h"
+#include "gdbstub/gdb_data.h"
 
 namespace Core {
 

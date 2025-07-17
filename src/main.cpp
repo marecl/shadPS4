@@ -8,11 +8,16 @@
 #include "unordered_map"
 
 #include <fmt/core.h>
+#include <sys/mman.h>
+#include <sys/prctl.h>
+#include <sys/wait.h>
 #include "common/config.h"
 #include "common/memory_patcher.h"
 #include "common/path_util.h"
 #include "core/file_sys/fs.h"
 #include "emulator.h"
+#include "gdbstub/gdb_data.h"
+#include "gdbstub/gdb_stub.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -205,9 +210,34 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Run the emulator with the resolved eboot path
-    Core::Emulator emulator;
-    emulator.Run(eboot_path, game_args);
+    pid_t parentpid = getpid();
+    pid_t stubpid = fork();
+
+    if (stubpid == 0) {
+        prctl(PR_SET_NAME, "shadgdb", 0, 0);
+        signal(SIGKILL, Core::Devtools::handle_sigterm);
+
+        auto gdb_stub = Core::Devtools::GdbStub(13377, parentpid);
+
+        if (gdb_stub.InitShared()) {
+            gdb_stub.Run();
+        }
+    }
+    if (stubpid < 0) {
+        perror("fork");
+    }
+    if (stubpid > 0) {
+        // Run the emulator with the resolved eboot path
+        //sleep(0.1);
+
+        Core::Emulator emulator;
+        emulator.Run(eboot_path, game_args);
+    }
+
+    kill(stubpid, SIGTERM);
+
+    int status;
+    waitpid(stubpid, &status, 0);
 
     return 0;
 }

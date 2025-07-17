@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <iostream>
 #include <fmt/xchar.h>
 #include <magic_enum/magic_enum_utility.hpp>
 #include <netinet/in.h>
@@ -9,6 +10,8 @@
 #include <sys/socket.h>
 #include <sys/user.h>
 #include <sys/wait.h>
+#include "common/logging/backend.h"
+#include "common/logging/log.h"
 
 #include <pthread.h>
 #include "common/assert.h"
@@ -18,12 +21,17 @@
 #include "core/libraries/kernel/threads/pthread.h"
 #include "core/memory.h"
 #include "core/thread.h"
-#include "gdb_data.h"
 #include "gdb_stub.h"
 
 using namespace ::Libraries::Kernel;
 
 namespace Core::Devtools {
+
+static std::atomic<bool> g_stop_requested = false;
+
+void handle_sigterm(int sig) {
+    g_stop_requested.store(true);
+}
 
 constexpr auto OK = "OK";
 constexpr auto E01 = "E01";
@@ -41,15 +49,24 @@ constexpr char target_description[] = R"(l<?xml version="1.0"?>
   <architecture>i386:x86-64</architecture>
 </target>)";
 
-GdbStub::GdbStub(const u16 port) : m_port(port), m_thread(&GdbStub::Run, this) {
+GdbStub::GdbStub(const u16 port, pid_t parent)
+    : m_port(port), pid_parent(parent), pid_self(getpid()) {
+    Common::Log::Initialize("debug.log");
+    Common::Log::Start();
     CreateSocket();
-    m_thread.detach();
 
     selectedThread = 0;
 }
 
-GdbStub::~GdbStub() {
-    close(m_socket);
+GdbStub::~GdbStub() {}
+
+bool GdbStub::InitShared() {
+    shd = GdbData.thread_shared();
+
+    if (shd != nullptr)
+        return true;
+    LOG_DEBUG(Debug, "Can't initialize shared memory for gdb");
+    return false;
 }
 
 void GdbStub::CreateSocket() {
@@ -59,7 +76,7 @@ void GdbStub::CreateSocket() {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(m_port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
     ASSERT_MSG(bind(m_socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != -1,
                "Failed to bind socket ({})", strerror(errno));
@@ -123,7 +140,7 @@ bool GdbStub::HandleIncomingData(const int client) {
     }
 
     if (data == "+") {
-        // Initial connection acknowledgement
+        // Connection acknowledgement
         send(client, "+", 1, 0);
         return true;
     }
@@ -171,14 +188,22 @@ pid_t GetTid(const pthread_t ptid) {
 }
 
 // Modified from xenia a little bit
-std::string BuildThreadList() {
-    const GdbDataType::thread_list_t threads = GdbData.thread_get_list();
+std::string GdbStub::BuildThreadList() {
+
     std::string buffer;
     buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
-    for (auto& [name, id, id_enc] : threads) {
+
+    for (u8 i = 0; i < shd->size; i++) {
+        ThreadID tid = shd->data[i];
+        u32 tid_enc = 1 + ((~tid) & 0x7FFFFFFF);
+        char _rawName[128];
+        pthread_getname_np(tid, _rawName, 128);
+        std::string name = std::string(_rawName);
+
         buffer += fmt::format("    <thread id=\"{:x}\" name=\"{}\" handle=\"{:x}\"></thread>\n",
-                              id_enc, name, id);
+                              tid_enc, name, tid);
     }
+
     buffer += "</threads>";
     return buffer;
 }
@@ -316,7 +341,8 @@ std::string GdbStub::handle_H_packet(const GdbCommand& command) {
             GdbData.thread_pause(target);
         }
         GdbData.thread_resume(target);
-        LOG_ERROR(Debug, "Dumping thread registers: {} ({:x})",GdbData.getThreadName(target), target);
+        LOG_ERROR(Debug, "Dumping thread registers: {} ({:x})", GdbData.getThreadName(target),
+                  target);
         return dumpRegistersFromThread(target);
     }
 
@@ -378,7 +404,7 @@ std::string GdbStub::handle_q_packet(const GdbCommand& command) {
     }
     if (command.cmd == "qTStatus") {
         LOG_WARNING(Debug, "qTStatus probably stubbed");
-        // return "T1;tstop:0";
+        return "T1;tstop:0";
         //  we're not tracing execution. yet.
         //  skip this because it throws an error for some reason
         // return "T0;tnotrun:0";
@@ -527,15 +553,15 @@ std::string GdbStub::dumpRegistersFromThread(ThreadID threadID) {
     return regs;
 }
 
-void GdbStub::Run(const std::stop_token& stop) {
-    LOG_INFO(Debug, "GDB stub listening on port {}", m_port);
+void GdbStub::Run() {
+    std::cout << "GDB stub listening on port " << m_port << std::endl;
 
     if (listen(m_socket, 1) == -1) {
         LOG_ERROR(Debug, "Failed to listen on socket ({})", strerror(errno));
         return;
     }
 
-    while (!stop.stop_requested()) {
+    while (!g_stop_requested.load()) {
         sockaddr_in client_addr{};
         socklen_t client_addr_len = sizeof(client_addr);
         const int client =
@@ -546,13 +572,23 @@ void GdbStub::Run(const std::stop_token& stop) {
         }
 
         LOG_INFO(Debug, "Client {} connected", client);
+        LOG_INFO(Debug, "{}", BuildThreadList());
+        // if (ptrace(PTRACE_ATTACH, this->spid, nullptr, nullptr) == -1) {
+        //     perror("ptrace attach");
+        //     return;
+        //  }
+        // waitpid(this->spid, nullptr, 0);  // czekaj na SIGSTOP
 
-        while (!stop.stop_requested()) {
+        while (!g_stop_requested.load()) {
             if (!HandleIncomingData(client)) {
                 // LOG_ERROR(Debug, "Failed to handle incoming data");
             }
         }
     }
+
+    close(m_socket);
+
+    LOG_DEBUG(Debug, "Stub exited");
 }
 
 } // namespace Core::Devtools

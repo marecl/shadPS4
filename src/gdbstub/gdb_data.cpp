@@ -20,7 +20,7 @@ std::vector<loadable_info_t> GdbDataImpl::loaded_binaries;
 std::unordered_map<ThreadID, ucontext_t> GdbDataImpl::ctx_dumps;
 std::unordered_map<ThreadID, std::mutex> GdbDataImpl::ctx_dump_mutex;
 
- std::string GdbDataImpl::getThreadName(ThreadID tid) {
+std::string GdbDataImpl::getThreadName(ThreadID tid) {
     char _rawName[128];
     pthread_getname_np(tid, _rawName, 128);
     return std::string(_rawName);
@@ -30,8 +30,16 @@ void GdbDataImpl::thread_register(ThreadID tid) {
     std::lock_guard lock{GdbDataImpl::thread_list_mutex};
     const u32 tid_encoded = 1 + ((~tid) & 0x7FFFFFFF);
     GdbDataImpl::thread_list.push_back(thread_meta_t(tid, tid_encoded));
-
+    update_shd();
     LOG_INFO(Debug, "Thread registered: {} ({:x} -> {:x})", getThreadName(tid), tid, tid_encoded);
+}
+
+void GdbDataImpl::update_shd() {
+    u8 idx = 0;
+    for (auto& [tid, _] : GdbDataImpl::thread_list) {
+        shared->data[idx++] = tid;
+    }
+    shared->size = idx;
 }
 
 void GdbDataImpl::thread_unregister(ThreadID tid) {
@@ -39,6 +47,7 @@ void GdbDataImpl::thread_unregister(ThreadID tid) {
 
     if (std::erase_if(thread_list, [&](const auto& v) { return std::get<0>(v) == tid; }) == 1) {
         LOG_INFO(Debug, "Unregistered thread: {:x}", tid);
+        update_shd();
         return;
     }
     LOG_INFO(Debug, "Failed to unregister thread: {:x}", tid);
@@ -215,9 +224,10 @@ void ctx_dump_handler(int sig, siginfo_t* si, void* ucontext) {
     LOG_INFO(Debug,
              "{} ({:x}) -> RIP: {:x} -> RDI: {:x} -> RSI: {:x} -> RBP: {:x} -> RBX: "
              "{:x}\n\t->Stack Dump: {}",
-             GdbDataImpl::getThreadName(this_id), reinterpret_cast<u64>(this_id), ctx.uc_mcontext.gregs[REG_RIP],
-             ctx.uc_mcontext.gregs[REG_RDI], ctx.uc_mcontext.gregs[REG_RSI],
-             ctx.uc_mcontext.gregs[REG_RBP], ctx.uc_mcontext.gregs[REG_RBX], out);
+             GdbDataImpl::getThreadName(this_id), reinterpret_cast<u64>(this_id),
+             ctx.uc_mcontext.gregs[REG_RIP], ctx.uc_mcontext.gregs[REG_RDI],
+             ctx.uc_mcontext.gregs[REG_RSI], ctx.uc_mcontext.gregs[REG_RBP],
+             ctx.uc_mcontext.gregs[REG_RBX], out);
 
     return;
 }
