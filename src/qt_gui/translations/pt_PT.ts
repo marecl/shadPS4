@@ -454,32 +454,8 @@
       <translation>Utilizar configurações por jogo</translation>
     </message>
     <message>
-      <source>L1 / LB</source>
-      <translation>L1 / LB</translation>
-    </message>
-    <message>
-      <source>L2 / LT</source>
-      <translation>L2 / LT</translation>
-    </message>
-    <message>
-      <source>Back</source>
-      <translation>Voltar</translation>
-    </message>
-    <message>
-      <source>R1 / RB</source>
-      <translation>R1 / RB</translation>
-    </message>
-    <message>
-      <source>R2 / RT</source>
-      <translation>R2 / RT</translation>
-    </message>
-    <message>
       <source>L3</source>
       <translation>L3</translation>
-    </message>
-    <message>
-      <source>Options / Start</source>
-      <translation>Opções / Start</translation>
     </message>
     <message>
       <source>R3</source>
@@ -488,22 +464,6 @@
     <message>
       <source>Face Buttons</source>
       <translation>Botões Frontais</translation>
-    </message>
-    <message>
-      <source>Triangle / Y</source>
-      <translation>Triângulo / Y</translation>
-    </message>
-    <message>
-      <source>Square / X</source>
-      <translation>Quadrado / X</translation>
-    </message>
-    <message>
-      <source>Circle / B</source>
-      <translation>Círculo / B</translation>
-    </message>
-    <message>
-      <source>Cross / A</source>
-      <translation>Cruz / A</translation>
     </message>
     <message>
       <source>Right Stick Deadzone (def:2, max:127)</source>
@@ -543,7 +503,7 @@
     </message>
     <message>
       <source>Unable to Save</source>
-      <translation>Não é possível salvar</translation>
+      <translation>Não foi possível guardar</translation>
     </message>
     <message>
       <source>Cannot bind axis values more than once</source>
@@ -551,7 +511,7 @@
     </message>
     <message>
       <source>Save</source>
-      <translation>Salvar</translation>
+      <translation>Guardar</translation>
     </message>
     <message>
       <source>Apply</source>
@@ -559,22 +519,90 @@
     </message>
     <message>
       <source>Restore Defaults</source>
-      <translation>Restaurar o Padrão</translation>
+      <translation>Restaurar Predefinições</translation>
     </message>
     <message>
       <source>Cancel</source>
       <translation>Cancelar</translation>
+    </message>
+    <message>
+      <source>unmapped</source>
+      <translation type="unfinished">unmapped</translation>
+    </message>
+    <message>
+      <source>L1</source>
+      <translation type="unfinished">L1</translation>
+    </message>
+    <message>
+      <source>R1</source>
+      <translation type="unfinished">R1</translation>
+    </message>
+    <message>
+      <source>L2</source>
+      <translation type="unfinished">L2</translation>
+    </message>
+    <message>
+      <source>Options</source>
+      <translation type="unfinished">Options</translation>
+    </message>
+    <message>
+      <source>R2</source>
+      <translation type="unfinished">R2</translation>
+    </message>
+    <message>
+      <source>Touchpad Left</source>
+      <translation type="unfinished">Touchpad Left</translation>
+    </message>
+    <message>
+      <source>Touchpad Center</source>
+      <translation type="unfinished">Touchpad Center</translation>
+    </message>
+    <message>
+      <source>Touchpad Right</source>
+      <translation type="unfinished">Touchpad Right</translation>
+    </message>
+    <message>
+      <source>Triangle</source>
+      <translation type="unfinished">Triangle</translation>
+    </message>
+    <message>
+      <source>Square</source>
+      <translation type="unfinished">Square</translation>
+    </message>
+    <message>
+      <source>Circle</source>
+      <translation type="unfinished">Circle</translation>
+    </message>
+    <message>
+      <source>Cross</source>
+      <translation type="unfinished">Cross</translation>
+    </message>
+    <message>
+      <source>Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</source>
+      <translation type="unfinished">Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</translation>
+    </message>
+    <message>
+      <source>Press a button</source>
+      <translation type="unfinished">Press a button</translation>
+    </message>
+    <message>
+      <source>Move analog stick</source>
+      <translation type="unfinished">Move analog stick</translation>
     </message>
   </context>
   <context>
     <name>EditorDialog</name>
     <message>
       <source>Edit Keyboard + Mouse and Controller input bindings</source>
-      <translation>Editar comandos do Teclado + Mouse e do Controle</translation>
+      <translation>Editar configurações de entrada do Teclado + Rato e do Comando</translation>
     </message>
     <message>
       <source>Use Per-Game configs</source>
-      <translation>Use uma configuração para cada jogo</translation>
+      <translation>Utilizar configurações por jogo</translation>
     </message>
     <message>
       <source>Error</source>
@@ -582,19 +610,19 @@
     </message>
     <message>
       <source>Could not open the file for reading</source>
-      <translation>Não foi possível abrir o arquivo para ler</translation>
+      <translation>Não foi possível abrir o ficheiro para leitura</translation>
     </message>
     <message>
       <source>Could not open the file for writing</source>
-      <translation>Não foi possível abrir o arquivo para escrever</translation>
+      <translation>Não foi possível abrir o ficheiro para escrita</translation>
     </message>
     <message>
       <source>Save Changes</source>
-      <translation>Salvar mudanças</translation>
+      <translation>Guardar as alterações</translation>
     </message>
     <message>
       <source>Do you want to save changes?</source>
-      <translation>Salvar as mudanças?</translation>
+      <translation>Pretende guardar as alterações?</translation>
     </message>
     <message>
       <source>Help</source>
@@ -610,7 +638,7 @@
     </message>
     <message>
       <source>Reset to Default</source>
-      <translation>Resetar ao Padrão</translation>
+      <translation>Repor para o Padrão</translation>
     </message>
   </context>
   <context>
@@ -747,6 +775,10 @@
     <message>
       <source>Last updated</source>
       <translation>Última atualização</translation>
+    </message>
+    <message>
+      <source>Favorite</source>
+      <translation type="unfinished">Favorite</translation>
     </message>
   </context>
   <context>
@@ -950,6 +982,14 @@
       <source>SFO Viewer for </source>
       <translation>Visualizador SFO para </translation>
     </message>
+    <message>
+      <source>Remove from Favorites</source>
+      <translation type="unfinished">Remove from Favorites</translation>
+    </message>
+    <message>
+      <source>Add to Favorites</source>
+      <translation type="unfinished">Add to Favorites</translation>
+    </message>
   </context>
   <context>
     <name>HelpDialog</name>
@@ -1057,10 +1097,6 @@
       <translation>L3</translation>
     </message>
     <message>
-      <source>Touchpad Click</source>
-      <translation>Clique do Touchpad</translation>
-    </message>
-    <message>
       <source>Mouse to Joystick</source>
       <translation>Rato para Manípulo</translation>
     </message>
@@ -1150,11 +1186,7 @@
     </message>
     <message>
       <source>Unable to Save</source>
-      <translation>Não é possível salvar</translation>
-    </message>
-    <message>
-      <source>Cannot bind any unique input more than once</source>
-      <translation>Não é possível vincular qualquer entrada única mais de uma vez</translation>
+      <translation>Não foi possível guardar</translation>
     </message>
     <message>
       <source>Press a key</source>
@@ -1166,11 +1198,11 @@
     </message>
     <message>
       <source>Mousewheel cannot be mapped to stick outputs</source>
-      <translation>Roda do rato não pode ser mapeada para saídas empates</translation>
+      <translation>Roda do rato não pode ser mapeada para saídas dos manípulos</translation>
     </message>
     <message>
       <source>Save</source>
-      <translation>Salvar</translation>
+      <translation>Guardar</translation>
     </message>
     <message>
       <source>Apply</source>
@@ -1178,11 +1210,31 @@
     </message>
     <message>
       <source>Restore Defaults</source>
-      <translation>Restaurar Definições</translation>
+      <translation>Restaurar Predefinições</translation>
     </message>
     <message>
       <source>Cancel</source>
       <translation>Cancelar</translation>
+    </message>
+    <message>
+      <source>Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</source>
+      <translation type="unfinished">Cannot bind any unique input more than once. Duplicate inputs mapped to the following buttons:
+
+%1</translation>
+    </message>
+    <message>
+      <source>Touchpad Left</source>
+      <translation type="unfinished">Touchpad Left</translation>
+    </message>
+    <message>
+      <source>Touchpad Center</source>
+      <translation type="unfinished">Touchpad Center</translation>
+    </message>
+    <message>
+      <source>Touchpad Right</source>
+      <translation type="unfinished">Touchpad Right</translation>
     </message>
   </context>
   <context>
@@ -1348,10 +1400,6 @@
       <translation>Lista de Jogos</translation>
     </message>
     <message>
-      <source> * Unsupported Vulkan Version</source>
-      <translation> * Versão do Vulkan não suportada</translation>
-    </message>
-    <message>
       <source>Download Cheats For All Installed Games</source>
       <translation>Transferir Cheats para Todos os Jogos Instalados</translation>
     </message>
@@ -1409,43 +1457,43 @@
     </message>
     <message>
       <source>Play</source>
-      <translation type="unfinished">Play</translation>
+      <translation>Reproduzir</translation>
     </message>
     <message>
       <source>Pause</source>
-      <translation type="unfinished">Pause</translation>
+      <translation>Pausa</translation>
     </message>
     <message>
       <source>Stop</source>
-      <translation type="unfinished">Stop</translation>
+      <translation>Parar</translation>
     </message>
     <message>
       <source>Restart</source>
-      <translation type="unfinished">Restart</translation>
+      <translation>Reiniciar</translation>
     </message>
     <message>
       <source>Full Screen</source>
-      <translation type="unfinished">Full Screen</translation>
+      <translation>Ecrã Inteiro</translation>
     </message>
     <message>
       <source>Controllers</source>
-      <translation type="unfinished">Controllers</translation>
+      <translation>Comandos</translation>
     </message>
     <message>
       <source>Keyboard</source>
-      <translation type="unfinished">Keyboard</translation>
+      <translation>Teclado</translation>
     </message>
     <message>
       <source>Refresh List</source>
-      <translation type="unfinished">Refresh List</translation>
+      <translation>Atualizar Lista</translation>
     </message>
     <message>
       <source>Resume</source>
-      <translation type="unfinished">Resume</translation>
+      <translation>Continuar</translation>
     </message>
     <message>
       <source>Show Labels Under Icons</source>
-      <translation type="unfinished">Show Labels Under Icons</translation>
+      <translation>Mostrar Etiquetas Debaixo dos Ícones</translation>
     </message>
   </context>
   <context>
@@ -1545,10 +1593,6 @@
     <message>
       <source>Controller</source>
       <translation>Comando</translation>
-    </message>
-    <message>
-      <source>Back Button Behavior</source>
-      <translation>Comportamento do Botão Voltar</translation>
     </message>
     <message>
       <source>Graphics</source>
@@ -1787,10 +1831,6 @@
       <translation>Tempo de Espera para Ocultar o Cursor:\nDefine o tempo em segundos para o rato desaparecer após ficar inativo.</translation>
     </message>
     <message>
-      <source>Back Button Behavior:\nSets the controller&apos;s back button to emulate tapping the specified position on the PS4 touchpad.</source>
-      <translation>Comportamento do Botão Voltar:\nConfigura o botão Voltar do comando para emular um toque na posição especificada no touchpad do PS4.</translation>
-    </message>
-    <message>
       <source>Display Compatibility Data:\nDisplays game compatibility information in table view. Enable &quot;Update Compatibility On Startup&quot; to get up-to-date information.</source>
       <translation>Exibir Dados de Compatibilidade:\nExibe informações de compatibilidade dos jogos em visualização de tabela.\nAtivar &quot;Atualizar Base de Dados de Compatibilidade no Arranque&quot; para obter informações atualizadas.</translation>
     </message>
@@ -1813,22 +1853,6 @@
     <message>
       <source>Always</source>
       <translation>Sempre</translation>
-    </message>
-    <message>
-      <source>Touchpad Left</source>
-      <translation>Esquerda do Touchpad</translation>
-    </message>
-    <message>
-      <source>Touchpad Right</source>
-      <translation>Direita do Touchpad</translation>
-    </message>
-    <message>
-      <source>Touchpad Center</source>
-      <translation>Centro do Touchpad</translation>
-    </message>
-    <message>
-      <source>None</source>
-      <translation>Nenhum</translation>
     </message>
     <message>
       <source>Graphics Device:\nOn multiple GPU systems, select the GPU the emulator will use from the drop down list,\nor select &quot;Auto Select&quot; to automatically determine it.</source>
@@ -2032,7 +2056,7 @@
     </message>
     <message>
       <source>Cannot create portable user folder</source>
-      <translation>Não é possível criar pasta de utilizador portátil</translation>
+      <translation>Não foi possível criar pasta de utilizador portátil</translation>
     </message>
     <message>
       <source>%1 already exists</source>
@@ -2048,7 +2072,11 @@
     </message>
     <message>
       <source>Open the custom trophy images/sounds folder:\nYou can add custom images to the trophies and an audio.\nAdd the files to custom_trophy with the following names:\ntrophy.wav OR trophy.mp3, bronze.png, gold.png, platinum.png, silver.png\nNote: The sound will only work in QT versions.</source>
-      <translation>Abra a pasta de imagens/sons de troféus personalizados:\nPoderá adicionar imagens personalizadas aos troféus e um áudio.\nAdicione os arquivos na pasta custom_trophy com os seguintes nomes:\ntrophy.mp3 ou trophy.wav, bronze.png, gold.png, platinum.png, silver.png\nObservação: O som funcionará apenas nas versões Qt.</translation>
+      <translation>Abra a pasta de imagens/sons de troféus personalizados:\nPoderá adicionar imagens personalizadas aos troféus e um áudio.\nAdicione os ficheiros na pasta custom_trophy com os seguintes nomes:\ntrophy.mp3 ou trophy.wav, bronze.png, gold.png, platinum.png, silver.png\nObservação: O som funcionará apenas nas versões Qt.</translation>
+    </message>
+    <message>
+      <source> * Unsupported Vulkan Version</source>
+      <translation> * Versão do Vulkan não suportada</translation>
     </message>
   </context>
   <context>
