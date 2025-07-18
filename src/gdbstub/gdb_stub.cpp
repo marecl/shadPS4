@@ -32,8 +32,6 @@ using namespace ::Libraries::Kernel;
 
 namespace Core::Devtools {
 
-volatile sig_atomic_t GdbStub::stop_flag;
-
 constexpr auto OK = "OK";
 constexpr auto E01 = "E01";
 
@@ -49,7 +47,6 @@ GdbStub::GdbStub(const u16 port, pid_t target, SharedVector* shared)
 
     selectedThread = nullptr;
     shd = shared;
-    GdbStub::stop_flag = 0;
 }
 
 GdbStub::~GdbStub() {}
@@ -148,7 +145,6 @@ bool GdbStub::HandleIncomingData(const int client) {
         return false;
     }
 
-    LOG_INFO(Debug, "Reply: {}", msg);
     if (send(client, msg.c_str(), msg.size(), 0) == -1) {
         return false;
     }
@@ -167,7 +163,7 @@ bool GdbStub::Run() {
         return false;
     }
 
-    while (GdbStub::stop_flag == 0) {
+    while (true) {
         sockaddr_in client_addr{};
         socklen_t client_addr_len = sizeof(client_addr);
         const int client =
@@ -180,7 +176,7 @@ bool GdbStub::Run() {
         LOG_INFO(Debug, "Client {} connected", client);
         // BuildThreadList();
 
-        while (GdbStub::stop_flag == 0) {
+        while (true) {
             if (!HandleIncomingData(client)) {
                 // LOG_ERROR(Debug, "Failed to handle incoming data");
             }
@@ -194,6 +190,9 @@ bool GdbStub::Run() {
 }
 
 std::string GdbStub::handler(const GdbCommand& command) {
+
+    if (command.cmd == "qAttached")
+        return "1";
 
     char category = command.cmd[0];
 
@@ -217,6 +216,9 @@ std::string GdbStub::handler(const GdbCommand& command) {
         return "S05";
 
     case 'c':
+        kill(pid_target, SIGCONT);
+        waitpid(pid_target, nullptr, 0);
+        return "S09";
         /*for (u16 idx = 0; idx < shd->size; idx++) {
             struct ThreadInfo* thd = &shd->threads[idx];
             ptrace(PTRACE_CONT, thd->tid, nullptr, nullptr);
@@ -230,16 +232,18 @@ std::string GdbStub::handler(const GdbCommand& command) {
     case 'H': // handle threads, -1 all, 0 any
         // return handle_H_packet(command);
         break;
-    case 'g':  /* {
-          struct ThreadInfo* target = getThreadByName(shd, GAME_MAIN_THREAD_NAME);
-          struct user_regs_struct regs;
-          struct user_fpregs_struct fpregs;
-          ptrace(PTRACE_GETREGS, target->tid, nullptr, &regs);
-          ptrace(PTRACE_GETFPREGS, target->tid, nullptr, &fpregs);
- 
-          LOG_ERROR(Debug, "Dumping thread registers: {} ({:x})", target->name, target->tid);
-          return dumpRegistersFromThread(&regs, &fpregs);
-      } */
+    case 'g':
+        return "00000000000000000000000000000000";
+        /*{
+            struct ThreadInfo* target = getThreadByName(shd, GAME_MAIN_THREAD_NAME);
+            struct user_regs_struct regs;
+            struct user_fpregs_struct fpregs;
+            ptrace(PTRACE_GETREGS, target->tid, nullptr, &regs);
+            ptrace(PTRACE_GETFPREGS, target->tid, nullptr, &fpregs);
+
+            LOG_ERROR(Debug, "Dumping thread registers: {} ({:x})", target->name, target->tid);
+            return dumpRegistersFromThread(&regs, &fpregs);
+        } */
         break; // read general registers
     case 'G':
         break; // write general registers
@@ -280,4 +284,49 @@ std::string GdbStub::handler(const GdbCommand& command) {
     return NIMPL(command.cmd);
 }
 
+// Modified from xenia a little bit
+std::string GdbStub::BuildThreadList() {
+
+    std::string buffer;
+    buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
+    LOG_WARNING(Debug, "Thread count: {}", shd->size);
+
+    for (u8 i = 0; i < shd->size; i++) {
+        struct ThreadInfo* thrd = &shd->threads[i];
+
+        LOG_WARNING(Debug, "\tID: {:x}\tEncID: {:x}\tName: {}", thrd->tid, thrd->tid_enc,
+                    std::string(thrd->name));
+
+        buffer += fmt::format("    <thread id=\"{:x}\" name=\"{}\" handle=\"{:x}\"></thread>\n",
+                              thrd->tid_enc, std::string(thrd->name), thrd->tid);
+    }
+
+    buffer += "</threads>";
+    return buffer;
+}
+std::string GdbStub::dumpRegistersFromThread(struct user_regs_struct* regs,
+                                             struct user_fpregs_struct* fpregs) {
+    std::string out = "";
+
+    out = out + byteSwap(regs->rax, sizeof(unsigned long long));
+    out = out + byteSwap(regs->rcx, sizeof(unsigned long long));
+    out = out + byteSwap(regs->rdx, sizeof(unsigned long long));
+    out = out + byteSwap(regs->rbx, sizeof(unsigned long long));
+
+    out = out + byteSwap(regs->rsp, sizeof(unsigned long long));
+    out = out + byteSwap(regs->rbp, sizeof(unsigned long long));
+    out = out + byteSwap(regs->rsi, sizeof(unsigned long long));
+    out = out + byteSwap(regs->rdi, sizeof(unsigned long long));
+    out = out + byteSwap(regs->rip, sizeof(unsigned long long));
+
+    out = out + byteSwap(regs->eflags, sizeof(unsigned long long));
+    out = out + byteSwap(regs->cs, sizeof(unsigned long long));
+    out = out + byteSwap(regs->ss, sizeof(unsigned long long));
+    out = out + byteSwap(regs->ds, sizeof(unsigned long long));
+    out = out + byteSwap(regs->es, sizeof(unsigned long long));
+    out = out + byteSwap(regs->fs, sizeof(unsigned long long));
+    out = out + byteSwap(regs->gs, sizeof(unsigned long long));
+
+    return out;
+}
 } // namespace Core::Devtools

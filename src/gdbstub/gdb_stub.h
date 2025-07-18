@@ -19,10 +19,6 @@ public:
 
     std::string BuildThreadList();
 
-    static void exit_with_grace(int sig) {
-        GdbStub::stop_flag = 1;
-    }
-
 private:
     static volatile sig_atomic_t stop_flag;
 
