@@ -32,8 +32,8 @@ void GdbDataImpl::thread_rebuild() {
         strncpy(thd->name, getThreadName(tid).c_str(), 16);
         thd->name[15] = 0;
 
-        LOG_WARNING(Debug, "\tID: {:x}\tEncID: {:x}\tName: {}", thd->tid, thd->tid_enc,
-                    std::string(thd->name));
+        //LOG_WARNING(Debug, "\tID: {:x}\tEncID: {:x}\tName: {}", thd->tid, thd->tid_enc,
+        //            std::string(thd->name));
 
         if (idx >= MAX_REGISTERED_THREADS) {
             LOG_CRITICAL(

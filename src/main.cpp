@@ -9,6 +9,7 @@
 
 #include <fmt/core.h>
 #include <sys/prctl.h>
+#include <sys/ptrace.h>
 #include <sys/wait.h>
 #include "common/config.h"
 #include "common/memory_patcher.h"
@@ -17,7 +18,6 @@
 #include "emulator.h"
 #include "gdbstub/gdb_data.h"
 #include "gdbstub/gdb_stub.h"
-#include <sys/ptrace.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -217,26 +217,34 @@ int main(int argc, char* argv[]) {
     auto sharedMem = GdbData.thread_shared();
 
     if (target > 0) {
+        Common::Log::Initialize("debug.log");
+        Common::Log::Start();
+        LOG_DEBUG(Debug, "Stub started");
         prctl(PR_SET_NAME, "shadgdb", 0, 0);
 
-        waitpid(target, nullptr, 0); // złap SIGSTOP
-        ptrace(PTRACE_CONT, target, nullptr, nullptr);
+        auto gdb_stub = Core::Devtools::GdbStub(13377, target, sharedMem);
 
-        auto gdb_stub = Core::Devtools::GdbStub(13377, parentpid, sharedMem);
-        exit(gdb_stub.Run() ? 0 : -1);
+        signal(SIGTERM, gdb_stub.exit_with_grace);
+
+        
+        int ret = gdb_stub.Run();
+
+        kill(target, SIGTERM);
+        int status;
+        waitpid(target, &status, 0);
     }
     if (target == 0) {
+        // Wait for the stub to seize what it can
         ptrace(PTRACE_TRACEME, 0, nullptr, nullptr);
         raise(SIGSTOP);
 
         // Run the emulator with the resolved eboot path
         Core::Emulator emulator;
         emulator.Run(eboot_path, game_args);
-    }
 
-    kill(target, SIGTERM);
-    int status;
-    waitpid(target, &status, 0);
+        kill(parentpid, SIGTERM);
+        exit(0);
+    }
 
     return 0;
 }

@@ -5,46 +5,20 @@
 
 #include <atomic>
 #include <cstring>
-#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
 #include <sys/mman.h>
-#include <ucontext.h>
 #include "common/logging/backend.h"
 #include "common/logging/log.h"
 #include "common/types.h"
-
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN 1
-#endif
-#include <Windows.h>
-using ThreadID = DWORD;
-#else
-#include <pthread.h>
-#include <signal.h>
-using ThreadID = pthread_t;
-#endif
+#include "threadinfo.h"
 
 namespace Libraries::Kernel {
 struct Pthread;
 } // namespace Libraries::Kernel
 
 namespace GdbDataType {
-
-struct ThreadInfo {
-    ThreadID tid;
-    u32 tid_enc;
-    char name[16];
-};
-
-#define MAX_REGISTERED_THREADS 2137
-
-struct SharedVector {
-    u16 size;
-    ThreadInfo threads[MAX_REGISTERED_THREADS];
-};
 
 typedef std::tuple<ThreadID, u32> thread_meta_t;
 typedef std::tuple<u64, u64, std::string> loadable_info_t;
@@ -66,7 +40,6 @@ using namespace ::Libraries::Kernel;
  * positive number.
  */
 
-#define GAME_MAIN_THREAD_NAME (const char*)"GAME_MainThread"
 
 class GdbDataImpl {
 
@@ -85,8 +58,8 @@ public:
         memset(shared->threads, 0, sizeof(shared->threads));
     }
     ~GdbDataImpl() {
-        //LOG_ERROR(Debug, "XXDDXXDD");
-        //munmap(shared, sizeof(SharedVector));
+        // LOG_ERROR(Debug, "XXDDXXDD");
+        // munmap(shared, sizeof(SharedVector));
     }
 
     SharedVector* thread_shared();
@@ -115,8 +88,8 @@ public:
     /*
      * TODO: this
      */
-    //void loadable_register(u64 base_addr, u64 size, std::string name);
-    //void loadable_unregister();
+    // void loadable_register(u64 base_addr, u64 size, std::string name);
+    // void loadable_unregister();
 
     struct SharedVector* shared;
 

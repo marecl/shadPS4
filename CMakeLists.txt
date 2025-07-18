@@ -644,6 +644,10 @@ set(DEV_TOOLS src/core/devtools/layer.cpp
               src/gdbstub/gdb_stub.h
               src/gdbstub/gdb_data.cpp
               src/gdbstub/gdb_data.h
+              src/gdbstub/threadinfo.h
+              src/gdbstub/threadinfo.cpp
+              src/gdbstub/processtools.h
+              src/gdbstub/processtools.cpp
 )
 
 set(COMMON src/common/logging/backend.cpp

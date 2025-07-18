@@ -7,31 +7,26 @@
 #include <thread>
 #include <ucontext.h>
 #include "gdb_data.h"
-
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN 1
-#endif
-#include <Windows.h>
-using ThreadID = DWORD;
-#else
-#include <pthread.h>
-#include <signal.h>
-using ThreadID = pthread_t;
-#endif
+#include "threadinfo.h"
 
 namespace Core::Devtools {
 
 class GdbStub {
 public:
-    explicit GdbStub(u16 port, pid_t parent, GdbDataType::SharedVector* shared);
+    explicit GdbStub(u16 port, pid_t parent, SharedVector* shared);
     ~GdbStub();
     bool Run();
 
     std::string BuildThreadList();
 
+    static void exit_with_grace(int sig) {
+        GdbStub::stop_flag = 1;
+    }
+
 private:
-    GdbDataType::SharedVector* shd;
+    static volatile sig_atomic_t stop_flag;
+
+    SharedVector* shd;
 
     // Taken from xenia
     enum class ControlCode : char {
@@ -42,7 +37,7 @@ private:
         Interrupt = '\03',
     };
 
-    GdbDataType::ThreadInfo* selectedThread;
+    ThreadInfo* selectedThread;
 
     pid_t pid_target;
     pid_t pid_self;
@@ -62,10 +57,9 @@ private:
     static GdbCommand ParsePacket(const std::string& data);
     bool HandleIncomingData(const int client);
     static GdbStub::GdbCommand HandleCommand(const GdbCommand& command);
-    GdbDataType::ThreadInfo* getThreadHandleFromString(const std::string& data);
-    std::string GdbStub::dumpRegistersFromThread(struct user_regs_struct regs,
-                                                 struct user_fpregs_struct fpregs);
-    std::string MakeResponse(const std::string& response);
+    ThreadInfo* getThreadHandleFromString(const std::string& data);
+    std::string dumpRegistersFromThread(struct user_regs_struct *regs,
+                                        struct user_fpregs_struct *fpregs);
     std::string handler(const GdbCommand& command);
     std::string handle_v_packet(const GdbCommand& command);
     std::string handle_H_packet(const GdbCommand& command);
