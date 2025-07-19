@@ -11,6 +11,8 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 #include "mainReal.h"
+#include "common/logging/log.h"
+#include "common/logging/backend.h"
 
 #include "gdbstub/threadinfo.h"
 // #include "gdbstub/gdb_data.h"
@@ -20,23 +22,23 @@ int main(int argc, char* argv[]) {
     pid_t parentpid = getpid();
     pid_t target = fork();
 
-    // don't move this to forked process. plz.
-    // auto sharedMem = GdbData.thread_shared();
     if (target == 0) {
         raise(SIGSTOP);
         auto ret = mainReal(argc, argv);
-        std::cout << "Child done\n";
         exit(ret);
     } else if (target > 0) {
         prctl(PR_SET_NAME, "shadgdb", 0, 0);
-        sleep(1);
+
+        Common::Log::Initialize("debug.log");
+        Common::Log::Start();
+
+        LOG_INFO(Debug, "XDXDXD");
+        LOG_WARNING(Debug, "XDXDXD");
+        LOG_CRITICAL(Debug, "XDXDXD");
 
         int status = 0;
         ThreadID targetTID = waitpid(target, &status, WSTOPPED);
-        if (!WIFSTOPPED(status)) {
-            std::cout << "Dziecko nie zostało zatrzymane przez SIGSTOP\n";
-            return -1;
-        }
+
 
         std::vector<ThreadID> actthr;
         actthr.push_back(targetTID);
@@ -47,8 +49,7 @@ int main(int argc, char* argv[]) {
         ptrace(PTRACE_CONT, targetTID, NULL, NULL);
 
         /*
-                // Common::Log::Initialize("debug.log");
-                // Common::Log::Start();
+
                 ptrace(PTRACE_SEIZE, target, NULL, NULL);
                 ptrace(PTRACE_SETOPTIONS, target, 0, PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT);
                 ptrace(PTRACE_CONT, target, NULL, NULL);
@@ -67,26 +68,21 @@ int main(int argc, char* argv[]) {
 
             if (WIFSTOPPED(status)) {
                 if (WSTOPSIG(status) == SIGSEGV) {
-                    struct user_regs_struct regs;
-                    ptrace(PTRACE_GETREGS, tid, 0, &regs);
-                    std::cout << "[*] Thread " << tid << " got SIGSEGV at RIP=0x" << std::hex
-                              << regs.rip << " (" << regs.rip - 0x7FF000000 << ")" << std::dec
-                              << std::endl;
-                    /*
-                                        unsigned char code[32];
-                                        std::cout << std::setw(2) << std::setfill('0') << std::hex;
-                                        for (int i = 1; i < 33; ++i) {
-                                            long data = ptrace(PTRACE_PEEKDATA, tid, regs.rip + i -
-                       1, NULL); if (data == -1) break; printf("%02X ", static_cast<unsigned
-                       char>(data)); if (i % 4 == 0) std::cout << std::endl;
-                                        }
-                                        std::cout << std::endl << std::dec;
+                    siginfo_t info;
+                    if (ptrace(PTRACE_GETSIGINFO, tid, 0, &info) == 0) {
+                        // Apparently we DO like this particular kind (Linux only?)
+                        if (info.si_code != SEGV_ACCERR) {
+                            // The rest is highly undesired
+                            struct user_regs_struct regs;
+                            ptrace(PTRACE_GETREGS, tid, 0, &regs);
+                            std::cout << "[*] Thread " << tid << " got undesired SIGSEGV "
+                                      << std::hex << info.si_code << " at RIP=0x" << regs.rip
+                                      << " (" << regs.rip - 0x7FF000000 << ")" << std::dec
+                                      << std::endl;
+                        }
+                        ptrace(PTRACE_CONT, tid, nullptr, SIGSEGV);
+                    }
 
-                                        std::cout << "Nacisnij enter aby kontynuowac po
-                       segfaulcie\n"; std::cin.get();
-                                        */
-
-                    ptrace(PTRACE_CONT, tid, nullptr, SIGSEGV);
                 } else {
                     std::cout << std::dec << "[*] Thread " << tid << " stopped with signal "
                               << WSTOPSIG(status) << std::endl;
@@ -107,9 +103,6 @@ int main(int argc, char* argv[]) {
 
                 std::cout << "[+] New thread/process: " << new_tid << "\n";
 
-                // for (auto& XD : actthr)
-                //    std::cout << '\t' << std::dec << XD << std::endl;
-
                 ptrace(PTRACE_SEIZE, new_tid, nullptr, nullptr);
                 ptrace(PTRACE_SETOPTIONS, new_tid, nullptr,
                        PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD);
@@ -117,7 +110,7 @@ int main(int argc, char* argv[]) {
                 ptrace(PTRACE_CONT, tid, nullptr, nullptr);
             }
 
-            if (status >> 16 == (SIGTRAP | 0x80)) {
+            if (status >> 8 == (SIGTRAP | 0x80)) {
                 std::cout << "[*] Syscall trap, continuing" << std::endl;
                 ptrace(PTRACE_CONT, tid, nullptr, nullptr);
                 continue;
@@ -133,9 +126,8 @@ int main(int argc, char* argv[]) {
                 std::cout << "[*] Thread " << tid << " forks " << status << "\n";
             }
         }
-        std::cout << "Parent done\n";
     } else {
-        std::cout << "huj" << std::endl;
+        std::cout << "Fork error" << std::endl;
     }
 
     return 0;

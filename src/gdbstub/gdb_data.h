@@ -25,29 +25,11 @@ typedef std::tuple<u64, u64, std::string> loadable_info_t;
 
 using namespace ::Libraries::Kernel;
 
-/****** THREADS ******/
-/*
- * Thread ID is a mess. You can get it easily, but referring
- * back to it will raise an exception. IDK why.
- *
- * Explanation ------ ptrace expected P(rocess)ID, not T(thread)ID,
- * as was suggested before
- * :)
- *
- * Short thread ID is needed because some programs don't handle u32
- * variables well, which causes them to become negative numbers. Not good.
- * Since thread ID is (most likely) 32bit anyway, we can turn it into complimentary
- * positive number.
- */
-
 class GdbDataImpl {
 
 public:
     GdbDataImpl() {}
-    ~GdbDataImpl() {
-        // LOG_ERROR(Debug, "XXDDXXDD");
-        // munmap(shared, sizeof(SharedVector));
-    }
+    ~GdbDataImpl() {}
 
     /********** THREADS ***********/
     void thread_register(ThreadID tid);
@@ -75,7 +57,6 @@ public:
     // void loadable_register(u64 base_addr, u64 size, std::string name);
     // void loadable_unregister();
 
-    struct SharedVector* shared;
 
 private:
     //  main list mutex
