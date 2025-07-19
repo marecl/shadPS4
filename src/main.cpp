@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdio>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -41,7 +42,8 @@ int main(int argc, char* argv[]) {
         actthr.push_back(targetTID);
 
         ptrace(PTRACE_SEIZE, targetTID, NULL, NULL);
-        ptrace(PTRACE_SETOPTIONS, targetTID, 0, PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT);
+        ptrace(PTRACE_SETOPTIONS, targetTID, 0,
+               PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD);
         ptrace(PTRACE_CONT, targetTID, NULL, NULL);
 
         /*
@@ -64,38 +66,37 @@ int main(int argc, char* argv[]) {
             }
 
             if (WIFSTOPPED(status)) {
-                std::cout << std::dec << "[*] Wątek " << tid << " zatrzymany przez sygnał "
-                          << WSTOPSIG(status) << std::endl;
                 if (WSTOPSIG(status) == SIGSEGV) {
                     struct user_regs_struct regs;
                     ptrace(PTRACE_GETREGS, tid, 0, &regs);
-                    std::cout << "RIP = 0x" << std::hex << regs.rip << " ("
-                              << regs.rip - 0x7FF000000 << ")\tRAX = 0x" << regs.rax << std::dec
+                    std::cout << "[*] Thread " << tid << " got SIGSEGV at RIP=0x" << std::hex
+                              << regs.rip << " (" << regs.rip - 0x7FF000000 << ")" << std::dec
                               << std::endl;
+                    /*
+                                        unsigned char code[32];
+                                        std::cout << std::setw(2) << std::setfill('0') << std::hex;
+                                        for (int i = 1; i < 33; ++i) {
+                                            long data = ptrace(PTRACE_PEEKDATA, tid, regs.rip + i -
+                       1, NULL); if (data == -1) break; printf("%02X ", static_cast<unsigned
+                       char>(data)); if (i % 4 == 0) std::cout << std::endl;
+                                        }
+                                        std::cout << std::endl << std::dec;
 
-                    unsigned char code[32];
-                    std::cout << std::setw(2) << std::setfill('0') << std::hex;
-                    for (int i = 1; i < 33; ++i) {
-                        long data = ptrace(PTRACE_PEEKDATA, tid, regs.rip + i, NULL);
-                        if (data == -1)
-                            break;
-                        std::cout << static_cast<unsigned char>(data) << '\t';
-                        if (i % 4 == 0)
-                            std::cout << std::endl;
-                    }
-                    std::cout << std::endl << std::dec;
+                                        std::cout << "Nacisnij enter aby kontynuowac po
+                       segfaulcie\n"; std::cin.get();
+                                        */
 
-                    std::cout << "Nacisnij enter aby kontynuowac po segfaulcie\n";
-                    std::cin.get();
-
-                    ptrace(PTRACE_CONT, tid, nullptr, nullptr);
+                    ptrace(PTRACE_CONT, tid, nullptr, SIGSEGV);
+                } else {
+                    std::cout << std::dec << "[*] Thread " << tid << " stopped with signal "
+                              << WSTOPSIG(status) << std::endl;
                 }
 
             } else if (WIFEXITED(status)) {
-                std::cout << "[*] Wątek " << tid << " zakończył się kodem " << WEXITSTATUS(status)
+                std::cout << "[-] Thread " << tid << " ended with code " << WEXITSTATUS(status)
                           << std::endl;
             } else if (WIFSIGNALED(status)) {
-                std::cout << "[*] Wątek " << tid << " został zabity sygnałem " << WTERMSIG(status)
+                std::cout << "[-] Thread " << tid << " was killed with " << WTERMSIG(status)
                           << std::endl;
             }
 
@@ -104,25 +105,32 @@ int main(int argc, char* argv[]) {
                 ptrace(PTRACE_GETEVENTMSG, tid, nullptr, &new_tid);
                 actthr.push_back(new_tid);
 
-                std::cout << "[*] Nowy wątek/proces utworzony: " << new_tid << "\n";
+                std::cout << "[+] New thread/process: " << new_tid << "\n";
 
                 // for (auto& XD : actthr)
                 //    std::cout << '\t' << std::dec << XD << std::endl;
 
                 ptrace(PTRACE_SEIZE, new_tid, nullptr, nullptr);
                 ptrace(PTRACE_SETOPTIONS, new_tid, nullptr,
-                       PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT);
+                       PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD);
                 ptrace(PTRACE_CONT, new_tid, nullptr, nullptr);
                 ptrace(PTRACE_CONT, tid, nullptr, nullptr);
             }
+
+            if (status >> 16 == (SIGTRAP | 0x80)) {
+                std::cout << "[*] Syscall trap, continuing" << std::endl;
+                ptrace(PTRACE_CONT, tid, nullptr, nullptr);
+                continue;
+            }
+
             if (status >> 8 == (SIGTRAP | (PTRACE_EVENT_EXIT << 8))) {
-                std::cout << "[-] Wątek " << tid << " kończy się " << status << "\n";
+                std::cout << "[-] Thread " << tid << " ends " << status << "\n";
                 actthr.erase(std::remove(actthr.begin(), actthr.end(), tid), actthr.end());
                 if (tid == target)
                     go = false;
             }
             if (status >> 8 == (SIGTRAP | (PTRACE_EVENT_VFORK << 8))) {
-                std::cout << "[-] Wątek " << tid << " forkuje " << status << "\n";
+                std::cout << "[*] Thread " << tid << " forks " << status << "\n";
             }
         }
         std::cout << "Parent done\n";
