@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
 #include <sys/prctl.h>
 #include <sys/ptrace.h>
+#include <sys/user.h>
 #include <sys/wait.h>
 #include "mainReal.h"
 
@@ -53,8 +55,8 @@ int main(int argc, char* argv[]) {
                 // auto gdb_stub = Core::Devtools::GdbStub(13377, target, sharedMem);
                 // int ret = gdb_stub.Run();
                 std::cout << "XDXDXD" << std::endl;*/
-
-        while (1) {
+        bool go = true;
+        while (go) {
             int status = 0;
             pid_t tid = waitpid(-1, &status, __WALL);
             if (tid == -1) {
@@ -62,10 +64,32 @@ int main(int argc, char* argv[]) {
             }
 
             if (WIFSTOPPED(status)) {
-                std::cout << "[*] Wątek " << tid << " zatrzymany przez sygnał " << WSTOPSIG(status)
-                          << std::endl;
-                //if (WSTOPSIG(status) == SIGSEGV)
-                 //   ptrace(PTRACE_CONT, tid, nullptr, nullptr);
+                std::cout << std::dec << "[*] Wątek " << tid << " zatrzymany przez sygnał "
+                          << WSTOPSIG(status) << std::endl;
+                if (WSTOPSIG(status) == SIGSEGV) {
+                    struct user_regs_struct regs;
+                    ptrace(PTRACE_GETREGS, tid, 0, &regs);
+                    std::cout << "RIP = 0x" << std::hex << regs.rip << " ("
+                              << regs.rip - 0x7FF000000 << ")\tRAX = 0x" << regs.rax << std::dec
+                              << std::endl;
+
+                    unsigned char code[32];
+                    std::cout << std::setw(2) << std::setfill('0') << std::hex;
+                    for (int i = 1; i < 33; ++i) {
+                        long data = ptrace(PTRACE_PEEKDATA, tid, regs.rip + i, NULL);
+                        if (data == -1)
+                            break;
+                        std::cout << static_cast<unsigned char>(data) << '\t';
+                        if (i % 4 == 0)
+                            std::cout << std::endl;
+                    }
+                    std::cout << std::endl << std::dec;
+
+                    std::cout << "Nacisnij enter aby kontynuowac po segfaulcie\n";
+                    std::cin.get();
+
+                    ptrace(PTRACE_CONT, tid, nullptr, nullptr);
+                }
 
             } else if (WIFEXITED(status)) {
                 std::cout << "[*] Wątek " << tid << " zakończył się kodem " << WEXITSTATUS(status)
@@ -88,12 +112,14 @@ int main(int argc, char* argv[]) {
                 ptrace(PTRACE_SEIZE, new_tid, nullptr, nullptr);
                 ptrace(PTRACE_SETOPTIONS, new_tid, nullptr,
                        PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT);
-                ptrace(PTRACE_CONT, tid, nullptr, nullptr);
                 ptrace(PTRACE_CONT, new_tid, nullptr, nullptr);
+                ptrace(PTRACE_CONT, tid, nullptr, nullptr);
             }
             if (status >> 8 == (SIGTRAP | (PTRACE_EVENT_EXIT << 8))) {
                 std::cout << "[-] Wątek " << tid << " kończy się " << status << "\n";
                 actthr.erase(std::remove(actthr.begin(), actthr.end(), tid), actthr.end());
+                if (tid == target)
+                    go = false;
             }
             if (status >> 8 == (SIGTRAP | (PTRACE_EVENT_VFORK << 8))) {
                 std::cout << "[-] Wątek " << tid << " forkuje " << status << "\n";
