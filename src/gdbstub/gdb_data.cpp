@@ -17,35 +17,6 @@ std::mutex GdbDataImpl::thread_list_mutex;
 std::vector<thread_meta_t> GdbDataImpl::thread_list;
 std::vector<loadable_info_t> GdbDataImpl::loaded_binaries;
 
-SharedVector* GdbDataImpl::thread_shared() {
-    return shared;
-}
-
-void GdbDataImpl::thread_rebuild() {
-    // don't mutex, it's invoked by register/unregister which already claims it
-    u16 idx = 0;
-
-    for (auto& [tid, tid_enc] : GdbDataImpl::thread_list) {
-        ThreadInfo* thd = &(shared->threads[idx++]);
-        thd->tid = tid;
-        thd->tid_enc = tid_enc;
-        strncpy(thd->name, getThreadName(tid).c_str(), 16);
-        thd->name[15] = 0;
-
-        //LOG_WARNING(Debug, "\tID: {:x}\tEncID: {:x}\tName: {}", thd->tid, thd->tid_enc,
-        //            std::string(thd->name));
-
-        if (idx >= MAX_REGISTERED_THREADS) {
-            LOG_CRITICAL(
-                Debug,
-                "There are {} threads. Congratulations. I hereby revoke your debugging privileges.",
-                MAX_REGISTERED_THREADS);
-            memset(0,0xDEADBEEF,0xFFFFFFFFFFFFFFFF);
-            break;
-        }
-    }
-    shared->size = idx;
-}
 
 std::string GdbDataImpl::getThreadName(ThreadID tid) {
     char _rawName[16];
@@ -58,7 +29,7 @@ void GdbDataImpl::thread_register(ThreadID tid) {
     const u32 tid_encoded = 1 + ((~tid) & 0x7FFFFFFF);
     GdbDataImpl::thread_list.push_back(thread_meta_t(tid, tid_encoded));
     LOG_INFO(Debug, "Thread registered: {} ({:x} -> {:x})", getThreadName(tid), tid, tid_encoded);
-    thread_rebuild();
+
 }
 
 void GdbDataImpl::thread_unregister(ThreadID tid) {
@@ -66,7 +37,7 @@ void GdbDataImpl::thread_unregister(ThreadID tid) {
 
     if (std::erase_if(thread_list, [&](const auto& v) { return std::get<0>(v) == tid; }) == 1) {
         LOG_INFO(Debug, "Unregistered thread: {:x}", tid);
-        thread_rebuild();
+
         return;
     }
     LOG_INFO(Debug, "Failed to unregister thread: {:x}", tid);

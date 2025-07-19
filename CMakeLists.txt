@@ -1073,8 +1073,6 @@ set(QT_GUI src/qt_gui/about_dialog.cpp
            src/qt_gui/settings_dialog.h
            src/qt_gui/settings_dialog.ui
            src/qt_gui/main.cpp
-           src/qt_gui/mainReal.cpp
-           src/qt_gui/mainReal.h
            src/qt_gui/gui_settings.cpp
            src/qt_gui/gui_settings.h
            src/qt_gui/settings.cpp
@@ -1112,6 +1110,8 @@ else()
         ${VIDEO_CORE}
         ${EMULATOR}
         src/main.cpp
+        src/mainReal.cpp
+        src/mainReal.h
         src/emulator.cpp
         src/emulator.h
         src/sdl_window.h

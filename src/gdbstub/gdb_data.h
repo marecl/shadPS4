@@ -40,30 +40,14 @@ using namespace ::Libraries::Kernel;
  * positive number.
  */
 
-
 class GdbDataImpl {
 
 public:
-    GdbDataImpl() {
-        shared =
-            static_cast<SharedVector*>(mmap(nullptr, sizeof(SharedVector), PROT_READ | PROT_WRITE,
-                                            MAP_SHARED | MAP_ANONYMOUS, -1, 0));
-        if (shared == MAP_FAILED) {
-            perror("mmap");
-            shared = nullptr;
-            return;
-        }
-
-        shared->size = 0;
-        memset(shared->threads, 0, sizeof(shared->threads));
-    }
+    GdbDataImpl() {}
     ~GdbDataImpl() {
         // LOG_ERROR(Debug, "XXDDXXDD");
         // munmap(shared, sizeof(SharedVector));
     }
-
-    SharedVector* thread_shared();
-    void thread_rebuild();
 
     /********** THREADS ***********/
     void thread_register(ThreadID tid);

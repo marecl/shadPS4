@@ -13,7 +13,7 @@ namespace Core::Devtools {
 
 class GdbStub {
 public:
-    explicit GdbStub(u16 port, pid_t parent, SharedVector* shared);
+    explicit GdbStub(u16 port, pid_t parent);
     ~GdbStub();
     bool Run();
 
@@ -22,7 +22,6 @@ public:
 private:
     static volatile sig_atomic_t stop_flag;
 
-    SharedVector* shd;
 
     // Taken from xenia
     enum class ControlCode : char {

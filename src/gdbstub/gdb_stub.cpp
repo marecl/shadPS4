@@ -41,12 +41,11 @@ constexpr char target_description[] = R"(l<?xml version="1.0"?>
   <architecture>i386:x86-64</architecture>
 </target>)";
 
-GdbStub::GdbStub(const u16 port, pid_t target, SharedVector* shared)
+GdbStub::GdbStub(const u16 port, pid_t target)
     : m_port(port), pid_target(target), pid_self(getpid()) {
     CreateSocket();
 
     selectedThread = nullptr;
-    shd = shared;
 }
 
 GdbStub::~GdbStub() {}
@@ -153,10 +152,6 @@ bool GdbStub::HandleIncomingData(const int client) {
 }
 
 bool GdbStub::Run() {
-    if (GdbData.thread_shared() == nullptr) {
-        LOG_ERROR(Debug, "Invalid thread buffer");
-        return false;
-    }
 
     if (listen(m_socket, 1) == -1) {
         std::cout << "Failed to listen on socket (" << strerror(errno) << ")" << std::endl;
@@ -289,17 +284,8 @@ std::string GdbStub::BuildThreadList() {
 
     std::string buffer;
     buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
-    LOG_WARNING(Debug, "Thread count: {}", shd->size);
+    LOG_WARNING(Debug, "Stub");
 
-    for (u8 i = 0; i < shd->size; i++) {
-        struct ThreadInfo* thrd = &shd->threads[i];
-
-        LOG_WARNING(Debug, "\tID: {:x}\tEncID: {:x}\tName: {}", thrd->tid, thrd->tid_enc,
-                    std::string(thrd->name));
-
-        buffer += fmt::format("    <thread id=\"{:x}\" name=\"{}\" handle=\"{:x}\"></thread>\n",
-                              thrd->tid_enc, std::string(thrd->name), thrd->tid);
-    }
 
     buffer += "</threads>";
     return buffer;

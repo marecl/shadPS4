@@ -209,5 +209,6 @@ int mainReal(int argc, char* argv[]) {
     Core::Emulator emulator;
     emulator.Run(eboot_path, game_args);
 
+                std::cout << "XDXDXD" << std::endl;
     return 0;
 }
