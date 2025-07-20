@@ -19,8 +19,6 @@ bool child_hijack(ThreadID target) {
     if (ptrace(PTRACE_SETOPTIONS, targetTID, 0,
                PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD) == -1)
         return false;
-    if (!child_continue(targetTID))
-        return false;
 
    // children.push_back(targetTID);
 

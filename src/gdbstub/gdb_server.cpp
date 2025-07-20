@@ -27,19 +27,28 @@ void StubServer::Stop(void) {
         _thread.join();
 }
 
+bool StubServer::ClientConnected(void) {
+    return _socket_client.load() != -1;
+}
+
 bool StubServer::GetMessage(std::string& out) {
     std::lock_guard<std::mutex> lock(_inbound_queue_mutex);
     if (_inbound_queue.empty())
         return false;
 
-    out = std::move(_inbound_queue.front());
+    out = _inbound_queue.front();
     _inbound_queue.pop();
     return true;
 }
 
 bool StubServer::SendMessage(std::string& in) {
-    std::lock_guard<std::mutex> lock(_outbound_queue_mutex);
-    _outbound_queue.push(in);
+
+    ssize_t sent = send(_socket_client.load(), in.c_str(), in.size(), 0);
+    if (sent == -1) {
+        std::cout << "Error while sending message" << std::endl;
+        return false;
+    }
+
     return true;
 }
 
@@ -88,30 +97,16 @@ void StubServer::Loop(void) {
         char inboundBuffer[1024] = {0};
 
         while (_running) {
-            {
-                std::lock_guard<std::mutex> lock(_outbound_queue_mutex);
-                if (!_outbound_queue.empty()) {
-                    std::string msg = std::move(_outbound_queue.front());
-                    _outbound_queue.pop();
-                    ssize_t sent = send(_socket_client.load(), msg.c_str(), msg.size(), 0);
-                    if (sent == -1) {
-                        std::cout << "Error while sending message" << std::endl;
-                        break;
-                    }
-                }
+            ssize_t bytes = read(_socket_client.load(), inboundBuffer, sizeof(inboundBuffer) - 1);
+            if (bytes > 0) {
+                std::lock_guard<std::mutex> lock(_inbound_queue_mutex);
+
+                std::string msg(inboundBuffer, bytes);
+                _inbound_queue.push(msg);
             }
-            {
-                ssize_t bytes =
-                    read(_socket_client.load(), inboundBuffer, sizeof(inboundBuffer) - 1);
-                if (bytes > 0) {
-                    std::lock_guard<std::mutex> lock(_inbound_queue_mutex);
-                    inboundBuffer[bytes] = 0;
-                    _inbound_queue.emplace(inboundBuffer);
-                }
-                if (bytes == -1) {
-                    std::cout << "Client error or disconnected" << std::endl;
-                    break;
-                }
+            if (bytes == -1) {
+                std::cout << "Client error or disconnected" << std::endl;
+                break;
             }
         }
 

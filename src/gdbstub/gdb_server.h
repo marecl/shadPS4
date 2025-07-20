@@ -15,8 +15,8 @@ public:
     }
 
     void Start(void);
-
     void Stop(void);
+    bool ClientConnected(void);
 
     bool GetMessage(std::string& out);
     bool SendMessage(std::string& in);
@@ -31,9 +31,7 @@ private:
     std::thread _thread;
 
     std::mutex _inbound_queue_mutex;
-    std::mutex _outbound_queue_mutex;
     std::queue<std::string> _inbound_queue;
-    std::queue<std::string> _outbound_queue;
 };
 
 #endif // GDBSTUB_SERVER_H

@@ -46,6 +46,23 @@ int main(int argc, char* argv[]) {
         StubServer srv(13377);
         srv.Start();
 
+        // wait for GDB
+        // we're holding child thread stopped in case if the user
+        // needs to debug the app itself
+        sleep(1);
+        if (!srv.ClientConnected()) {
+            // if GDB is not connected, continue as normal
+            if (!child_continue(target)) {
+                LOG_ERROR(Debug, "Cannot wake up child {}", target);
+                return -1;
+            }
+        }
+
+        // Rebuild just in case. On init there's only one thread active anyway
+        Core::Devtools::GdbStub::ThreadRefresh();
+        Core::Devtools::GdbStub::g_system_state.thread_selected = target;
+        Core::Devtools::GdbStub::g_system_state.thread_main = target;
+
         std::string response;
 
         while (1) {
@@ -66,13 +83,13 @@ int main(int argc, char* argv[]) {
                     break;
                 case 1: {
                     GdbStub::GdbCommand cmd = GdbStub::ParsePacket(msg);
-                    
+
                     response = GdbStub::MakeResponse(GdbStub::HandlePacket(cmd));
                     LOG_INFO(Debug, "Received data:\n\tRAW: {}\n\tCMD: {}\n\tARG: {}\n\tRESP: {}",
                              cmd.raw, cmd.cmd, cmd.arg, response);
                 } break;
                 case 2:
-                    LOG_INFO(Debug, "Repeat response requested", response);
+                    LOG_INFO(Debug, "Repeat response requested: {}", response);
                     break;
                 }
                 if (!isError)

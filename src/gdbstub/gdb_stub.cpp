@@ -32,16 +32,86 @@ namespace Core::Devtools {
 
 namespace GdbStub {
 
+struct system_state_t g_system_state = {.running = false,
+                                        .thread_main = static_cast<ThreadID>(-1),
+                                        .thread_selected = static_cast<ThreadID>(-1)};
+
 constexpr auto OK = "OK";
 constexpr auto E01 = "E01";
 
 std::string HandlePacket(GdbCommand cmd) {
-
-    if(cmd.cmd == "qSupported"){
-        return "PacketSize=1024";
+    if (cmd.cmd[0] == '?') {
+        return "S05";
     }
 
-    return "";
+    if (cmd.cmd[0] == 'H') {
+        if (cmd.cmd == "Hg") {
+            // for (auto [tid, name] : g_system_state.threads) {
+            //     LOG_WARNING(Debug, "{}\t{}", tid, name);
+            // }
+
+            ThreadID ttid = std::stoul(cmd.arg, nullptr, 16);
+            // could be different but may work for now (I think)
+            if (ttid == 0) {
+                g_system_state.thread_selected = g_system_state.thread_main;
+            } else if (g_system_state.threads.find(ttid) != g_system_state.threads.end()) {
+                g_system_state.thread_selected = ttid;
+            } else {
+                LOG_ERROR(Debug, "GDB requested nonexistent PID:{}", ttid);
+                return E01;
+            }
+            LOG_INFO(Debug, "Selected thread: {}", g_system_state.thread_selected);
+
+            return OK;
+        }
+    }
+
+    if (cmd.cmd[0] == 'v') {
+        if (cmd.cmd == "vMustReplyEmpty") {
+            // all unknown v packets must return the same thing (this)
+            return "";
+        }
+        if (cmd.cmd == "vCont?") {
+            return "vCont;s;c;t";
+        }
+        return "";
+    }
+
+    if (cmd.cmd[0] == 'q') {
+        const std::vector<std::string> argTokens = split(cmd.arg, ':');
+        if (cmd.cmd == "qC") {
+            return std::format("QC{:x}", g_system_state.thread_selected);
+        }
+        if (cmd.cmd == "qAttached") {
+            return "1";
+        }
+        if (cmd.cmd == "qSupported") {
+            std::string resp = "PacketSize=1024;multiprocess-;qXfer:features:read+;qXfer:threads:"
+                               "read+;binary-upload+";
+            if (resp.find("swbreak+"))
+                resp += "swbreak+";
+            return resp;
+        }
+
+        if (cmd.cmd == "qXfer") {
+            if (argTokens[1] == "read") {
+                if (argTokens[0] == "features") {
+                    if (argTokens[2] == "target.xml") {
+                        return R"(l<?xml version="1.0"?>
+<!DOCTYPE target SYSTEM "gdb-target.dtd">
+<target version="1.0">
+  <architecture>i386:x86-64</architecture>
+</target>)";
+                    }
+                }
+                if (argTokens[0] == "threads") {
+                    return ThreadList();
+                    LOG_WARNING(Debug, "Stub");
+                }
+            }
+        }
+    }
+    return E01;
 }
 
 /*
@@ -63,6 +133,9 @@ s8 Preprocess(std::string& data) {
 
     if (data == "\03") {
         return 1;
+    }
+    if (data == "-") {
+        return 2;
     }
 
     if (data.front() == char(ControlCode::Ack)) {
@@ -114,12 +187,55 @@ std::string MakeResponse(const std::string response) {
     return "+$" + response + "#" + fmt::format("{:02X}", CalculateChecksum(response));
 }
 
-void ThreadRegister(ThreadID id) {
-    g_system_state.threads.push_back(id);
+std::string ThreadGetName(ThreadID tid) {
+    // pthread can't pull out name if it belongs to other process
+    // just... really?
+    // pthread_getname_np(tid, buf, 16);
+
+    std::ifstream commFile(std::format("/proc/{}/comm", tid));
+    if (!commFile.is_open()) {
+        return {};
+    }
+    std::string name;
+    std::getline(commFile, name);
+    return name;
 }
-void ThreadUnregister(ThreadID id) {
-    auto& threads = g_system_state.threads;
-    threads.erase(std::remove(threads.begin(), threads.end(), id));
+
+void ThreadRegister(ThreadID tid) {
+    // Give it a temporary name
+    g_system_state.threads[tid] = std::format("Thr{}", tid);
+}
+void ThreadUnregister(ThreadID tid) {
+    if (g_system_state.thread_main == tid) {
+        LOG_WARNING(Debug, "Main thread unregistered: {}", tid);
+        g_system_state.thread_main = -1;
+    }
+    g_system_state.threads.erase(tid);
+}
+
+void ThreadRefresh(void) {
+    bool thrfnd = false;
+    for (auto& [tid, name] : g_system_state.threads) {
+        std::string thrName = ThreadGetName(tid);
+        name = thrName;
+        if (tid == g_system_state.thread_selected)
+            thrfnd = true;
+    }
+    if (!thrfnd)
+        g_system_state.thread_selected = g_system_state.thread_main;
+}
+
+std::string ThreadList() {
+    ThreadRefresh();
+    std::string buffer = "";
+    buffer += R"*(l<?xml version="1.0"?><threads>)*";
+
+    for (auto& [tid, name] : g_system_state.threads) {
+        buffer += fmt::format(R"*(<thread id="{:x}" name="{}" handle="{:x}"/>)*", tid, name, tid);
+    }
+
+    buffer += "</threads>";
+    return buffer;
 }
 
 } // namespace GdbStub
@@ -279,7 +395,7 @@ std::string GdbStub2::handler(const GdbCommand& command) {
 }
 
 // Modified from xenia a little bit
-std::string GdbStub2::BuildThreadList() {
+std::string GdbStub2::ThreadList() {
 
     std::string buffer;
     buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";

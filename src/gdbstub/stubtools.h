@@ -10,13 +10,6 @@ static u8 CalculateChecksum(const std::string& command) {
     return sum & 0xFF;
 }
 
-// To (supposedly) get thread ID from a pthread_t
-ThreadID GetTid(const pthread_t ptid) {
-    ThreadID tid = 0;
-    memcpy(&tid, &ptid, std::min(sizeof(tid), sizeof(ptid)));
-    return tid;
-}
-
 std::string MakeResponse(const std::string& response) {
     return "+$" + response + "#" + fmt::format("{:02X}", CalculateChecksum(response));
 }

@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #include <ucontext.h>
 #include "gdb_data.h"
@@ -21,11 +22,16 @@ namespace GdbStub {
 
 #define MAX_REGISTERED_THREADS 2137
 
-struct {
+struct system_state_t {
     bool running;
-    ThreadID selected_thread_idx;
-    std::vector<ThreadID> threads;
-} g_system_state;
+    // make this const at program startup
+    ThreadID thread_main;
+    // this not
+    // in case if gdb can select multiple threads, be prepared to turn this into vector
+    ThreadID thread_selected;
+    std::unordered_map<pid_t, std::string> threads;
+};
+extern struct system_state_t g_system_state;
 
 enum class ControlCode : char {
     Ack = '+',
@@ -42,12 +48,18 @@ struct GdbCommand {
 };
 
 std::string HandlePacket(GdbCommand cmd);
+void ThreadRegister(ThreadID id);
+void ThreadUnregister(ThreadID id);
+void ThreadRefresh(void);
+std::string ThreadList(void);
+ThreadID ThreadMainOrElse(void);
+
+// pretty generic if you asked me
 s8 Preprocess(std::string& data);
 GdbCommand ParsePacket(const std::string data);
 std::string MakeResponse(const std::string response);
 
-void ThreadRegister(ThreadID id);
-void ThreadUnregister(ThreadID id);
+std::string ThreadGetName(ThreadID tid);
 
 } // namespace GdbStub
 /*
@@ -57,7 +69,7 @@ public:
     ~GdbStub2();
     bool Run();
 
-    std::string BuildThreadList(void);
+    std::string ThreadList(void);
 
 private:
     std::vector<ThreadID> children;
