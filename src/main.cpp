@@ -10,13 +10,15 @@
 #include <sys/ptrace.h>
 #include <sys/user.h>
 #include <sys/wait.h>
-#include "mainReal.h"
-#include "common/logging/log.h"
 #include "common/logging/backend.h"
+#include "common/logging/log.h"
+#include "mainReal.h"
 
 #include "gdbstub/threadinfo.h"
 // #include "gdbstub/gdb_data.h"
 // #include "gdbstub/gdb_stub.h"
+#include "gdbstub/childtools.h"
+#include "gdbstub/gdb_server.h"
 
 int main(int argc, char* argv[]) {
     pid_t parentpid = getpid();
@@ -26,48 +28,45 @@ int main(int argc, char* argv[]) {
         raise(SIGSTOP);
         auto ret = mainReal(argc, argv);
         exit(ret);
-    } else if (target > 0) {
-        prctl(PR_SET_NAME, "shadgdb", 0, 0);
 
-        Common::Log::Initialize("debug.log");
+    } else if (target > 0) {
+        prctl(PR_SET_NAME, "shaddebug", 0, 0);
+
+        Common::Log::Initialize();
         Common::Log::Start();
 
-        LOG_INFO(Debug, "XDXDXD");
-        LOG_WARNING(Debug, "XDXDXD");
-        LOG_CRITICAL(Debug, "XDXDXD");
+        // Core::Devtools::GdbStub stub = Core::Devtools::GdbStub(13377, target);
 
-        int status = 0;
-        ThreadID targetTID = waitpid(target, &status, WSTOPPED);
+        if (!child_hijack(target)) {
+            LOG_ERROR(Debug, "[-] Cannot seize thread {}", target);
+            return -1;
+        }
+        LOG_INFO(Debug, "[*] Thread {} seized", target);
 
+        /*if (!stub.CreateSocket()) {
+            LOG_ERROR(Debug, "Stub can't access socket for GDB");
+            return -1;
+        }*/
+        StubServer srv(13377);
+        srv.Start();
 
-        std::vector<ThreadID> actthr;
-        actthr.push_back(targetTID);
+        while (1) {
+            std::string msg;
+            if (srv.GetMessage(msg)) {
+                LOG_WARNING(Debug, "{}", msg);
+            }
 
-        ptrace(PTRACE_SEIZE, targetTID, NULL, NULL);
-        ptrace(PTRACE_SETOPTIONS, targetTID, 0,
-               PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD);
-        ptrace(PTRACE_CONT, targetTID, NULL, NULL);
-
-        /*
-
-                ptrace(PTRACE_SEIZE, target, NULL, NULL);
-                ptrace(PTRACE_SETOPTIONS, target, 0, PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT);
-                ptrace(PTRACE_CONT, target, NULL, NULL);
-                waitpid(target, &status, 0);
-
-                // auto gdb_stub = Core::Devtools::GdbStub(13377, target, sharedMem);
-                // int ret = gdb_stub.Run();
-                std::cout << "XDXDXD" << std::endl;*/
-        bool go = true;
-        while (go) {
             int status = 0;
-            pid_t tid = waitpid(-1, &status, __WALL);
+            pid_t tid = waitpid(-1, &status, __WALL | WNOHANG);
+            if (tid == 0) {
+                continue;
+            }
             if (tid == -1) {
                 break;
             }
 
-            if (WIFSTOPPED(status)) {
-                if (WSTOPSIG(status) == SIGSEGV) {
+            if (child_thread_stopped(status)) {
+                if (child_thread_stop_reason(status) == SIGSEGV) {
                     siginfo_t info;
                     if (ptrace(PTRACE_GETSIGINFO, tid, 0, &info) == 0) {
                         // Apparently we DO like this particular kind (Linux only?)
@@ -75,57 +74,60 @@ int main(int argc, char* argv[]) {
                             // The rest is highly undesired
                             struct user_regs_struct regs;
                             ptrace(PTRACE_GETREGS, tid, 0, &regs);
-                            std::cout << "[*] Thread " << tid << " got undesired SIGSEGV "
-                                      << std::hex << info.si_code << " at RIP=0x" << regs.rip
-                                      << " (" << regs.rip - 0x7FF000000 << ")" << std::dec
-                                      << std::endl;
+
+                            LOG_ERROR(Debug,
+                                      "[*] Thread {} got undesired SIGSEGV {:X} at RIP=0x{:X} (:X)",
+                                      tid, regs.rip, regs.rip - 0x7FF000000);
                         }
-                        ptrace(PTRACE_CONT, tid, nullptr, SIGSEGV);
+                        child_continue(tid, SIGSEGV);
                     }
 
+                } else if (child_thread_stop_reason(status) == SIGTRAP) {
+                    LOG_INFO(Debug, "[*] Thread {} got SIGTRAP {:X}", tid,
+                             child_thread_stop_reason(status));
+
                 } else {
-                    std::cout << std::dec << "[*] Thread " << tid << " stopped with signal "
-                              << WSTOPSIG(status) << std::endl;
+                    LOG_INFO(Debug, "[*] Thread {} stopped with signal {:X}", tid,
+                             child_thread_stop_reason(status));
                 }
 
-            } else if (WIFEXITED(status)) {
-                std::cout << "[-] Thread " << tid << " ended with code " << WEXITSTATUS(status)
-                          << std::endl;
-            } else if (WIFSIGNALED(status)) {
-                std::cout << "[-] Thread " << tid << " was killed with " << WTERMSIG(status)
-                          << std::endl;
+            } else if (child_thread_exited(status)) {
+                LOG_INFO(Debug, "[-] Thread {} ended with code {:X}", tid,
+                         child_thread_exit_reason(status));
+            } else if (child_thread_killed(status)) {
+                LOG_INFO(Debug, "[-] Thread {} was killed with {:X}", tid,
+                         child_thread_kill_reason(status));
             }
 
-            if (status >> 8 == (SIGTRAP | (PTRACE_EVENT_CLONE << 8))) {
+            if (child_thread_evt_clone(status)) {
                 unsigned long new_tid = 0;
                 ptrace(PTRACE_GETEVENTMSG, tid, nullptr, &new_tid);
-                actthr.push_back(new_tid);
 
-                std::cout << "[+] New thread/process: " << new_tid << "\n";
+                LOG_INFO(Debug, "[+] New thread/process: {}", new_tid);
 
                 ptrace(PTRACE_SEIZE, new_tid, nullptr, nullptr);
                 ptrace(PTRACE_SETOPTIONS, new_tid, nullptr,
                        PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD);
-                ptrace(PTRACE_CONT, new_tid, nullptr, nullptr);
-                ptrace(PTRACE_CONT, tid, nullptr, nullptr);
-            }
 
-            if (status >> 8 == (SIGTRAP | 0x80)) {
-                std::cout << "[*] Syscall trap, continuing" << std::endl;
-                ptrace(PTRACE_CONT, tid, nullptr, nullptr);
-                continue;
+                child_continue(new_tid);
+                child_continue(tid);
+                // children.push_back(new_tid);
             }
-
-            if (status >> 8 == (SIGTRAP | (PTRACE_EVENT_EXIT << 8))) {
-                std::cout << "[-] Thread " << tid << " ends " << status << "\n";
-                actthr.erase(std::remove(actthr.begin(), actthr.end(), tid), actthr.end());
-                if (tid == target)
-                    go = false;
+            if (child_thread_evt_exit(status)) {
+                LOG_INFO(Debug, "[-] Thread {} ends with status {:X}", tid, status);
+                // children.erase(std::remove(children.begin(), children.end(), tid),
+                // children.end());
+                if (tid == target) {
+                    break;
+                }
             }
-            if (status >> 8 == (SIGTRAP | (PTRACE_EVENT_VFORK << 8))) {
-                std::cout << "[*] Thread " << tid << " forks " << status << "\n";
+            if (child_thread_sigtrap_is_syscall(status)) {
+                LOG_INFO(Debug, "[*] Syscall trap, continuing");
+                child_continue(tid);
             }
         }
+        srv.Stop();
+        std::cout << "Parent out" << std::endl;
     } else {
         std::cout << "Fork error" << std::endl;
     }

@@ -6,18 +6,16 @@
 #include <string>
 #include <fmt/xchar.h>
 #include <netinet/in.h>
-#include <sys/mman.h>
+#include <pthread.h>
 #include <sys/ptrace.h>
 #include <sys/socket.h>
 #include <sys/user.h>
 #include <sys/wait.h>
-#include "common/logging/backend.h"
-#include "common/logging/log.h"
 
-#include <pthread.h>
-#include <sys/user.h>
 #include "common/assert.h"
 #include "common/debug.h"
+#include "common/logging/backend.h"
+#include "common/logging/log.h"
 #include "core/debug_state.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/threads/pthread.h"
@@ -41,16 +39,32 @@ constexpr char target_description[] = R"(l<?xml version="1.0"?>
   <architecture>i386:x86-64</architecture>
 </target>)";
 
-GdbStub::GdbStub(const u16 port, pid_t target)
-    : m_port(port), pid_target(target), pid_self(getpid()) {
-    CreateSocket();
+GdbStub::GdbStub(const u16 port, pid_t target_pid)
+    : m_port(port), target_pid(target_pid), self_pid(getpid()) {
 
     selectedThread = nullptr;
 }
 
 GdbStub::~GdbStub() {}
 
-void GdbStub::CreateSocket() {
+static std::atomic<int> client_sock{-1};
+static std::thread* listener;
+
+void wait_for_client(int server_sock) {
+    sockaddr_in client_addr{};
+    socklen_t client_len = sizeof(client_addr);
+
+    int sock = accept(server_sock, (sockaddr*)&client_addr, &client_len);
+    if (sock < 0) {
+        std::cerr << "Błąd accept()\n";
+        return;
+    }
+
+    std::cout << "[+] Klient połączony!\n";
+    client_sock.store(sock); // ustawiamy jako atomowy
+}
+
+bool GdbStub::CreateSocket() {
     m_socket = socket(AF_INET, SOCK_STREAM, 0);
     ASSERT_MSG(m_socket != -1, "Failed to create socket ({})", strerror(errno));
 
@@ -61,45 +75,16 @@ void GdbStub::CreateSocket() {
 
     ASSERT_MSG(bind(m_socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != -1,
                "Failed to bind socket ({})", strerror(errno));
+
+    if (listen(m_socket, 1) == -1) {
+        std::cout << "Failed to listen on socket (" << strerror(errno) << ")" << std::endl;
+        close(m_socket);
+        return false;
+    }
     std::cout << "GDB stub listening on port " << m_port << std::endl;
-}
+    //listener = new (std::thread(wait_for_client, m_socket));
 
-GdbStub::GdbCommand GdbStub::ParsePacket(const std::string& data) {
-    GdbCommand out;
-    out.raw = "";
-    out.cmd = "";
-    out.arg = "";
-
-    if (data.front() == char(ControlCode::Interrupt)) {
-        out.cmd = "\03";
-        return out;
-    }
-
-    const auto end_pos = data.find(char(ControlCode::PacketEnd));
-
-    if (data[0] != char(ControlCode::PacketStart) || end_pos == std::string::npos) {
-        // UNREACHABLE_MSG("Malformed packet: {}", data);
-        LOG_ERROR(Debug, "Malformed packet: {}", data);
-        return out;
-    }
-
-    const std::string_view cmd_view = std::string_view(data).substr(1, end_pos - 1);
-
-    out.raw = data;
-    out.cmd = std::string(cmd_view);
-    out.arg = "";
-
-    if (cmd_view.length() == 1)
-        return out;
-
-    auto septoken = cmd_view.find_first_of(":;");
-    auto maybeNumber = cmd_view.find_first_of("-0123456789");
-    if (const size_t pos = std::min(septoken, maybeNumber); pos != std::string::npos) {
-        out.cmd = cmd_view.substr(0, pos);
-        out.arg = cmd_view.substr(pos + (pos == septoken ? 1 : 0));
-    }
-
-    return out;
+    return true;
 }
 
 static std::string prevMsg;
@@ -152,35 +137,22 @@ bool GdbStub::HandleIncomingData(const int client) {
 }
 
 bool GdbStub::Run() {
+    if (client_sock.load() == -1)
+        return true;
+    const int client = client_sock.load();
+    client_sock.store(-1);
 
-    if (listen(m_socket, 1) == -1) {
-        std::cout << "Failed to listen on socket (" << strerror(errno) << ")" << std::endl;
-        return false;
-    }
+    LOG_INFO(Debug, "Client {} connected", client_sock.load());
+
+    // BuildThreadList();
 
     while (true) {
-        sockaddr_in client_addr{};
-        socklen_t client_addr_len = sizeof(client_addr);
-        const int client =
-            accept(m_socket, reinterpret_cast<sockaddr*>(&client_addr), &client_addr_len);
-        if (client == -1) {
-            LOG_ERROR(Debug, "Failed to accept client ({})", strerror(errno));
-            continue;
-        }
-
-        LOG_INFO(Debug, "Client {} connected", client);
-        // BuildThreadList();
-
-        while (true) {
-            if (!HandleIncomingData(client)) {
-                // LOG_ERROR(Debug, "Failed to handle incoming data");
-            }
-        }
+        HandleIncomingData(client);
     }
 
     close(m_socket);
 
-    LOG_DEBUG(Debug, "Stub exited");
+    LOG_INFO(Debug, "Stub exited");
     return true;
 }
 
@@ -211,8 +183,8 @@ std::string GdbStub::handler(const GdbCommand& command) {
         return "S05";
 
     case 'c':
-        kill(pid_target, SIGCONT);
-        waitpid(pid_target, nullptr, 0);
+        // kill(target_pid, SIGCONT);
+        // waitpid(target_pid, nullptr, 0);
         return "S09";
         /*for (u16 idx = 0; idx < shd->size; idx++) {
             struct ThreadInfo* thd = &shd->threads[idx];
@@ -286,7 +258,6 @@ std::string GdbStub::BuildThreadList() {
     buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
     LOG_WARNING(Debug, "Stub");
 
-
     buffer += "</threads>";
     return buffer;
 }
@@ -312,6 +283,44 @@ std::string GdbStub::dumpRegistersFromThread(struct user_regs_struct* regs,
     out = out + byteSwap(regs->es, sizeof(unsigned long long));
     out = out + byteSwap(regs->fs, sizeof(unsigned long long));
     out = out + byteSwap(regs->gs, sizeof(unsigned long long));
+
+    return out;
+}
+GdbStub::GdbCommand GdbStub::ParsePacket(const std::string& data) {
+    GdbCommand out;
+    out.raw = "";
+    out.cmd = "";
+    out.arg = "";
+
+    if (data.front() == char(ControlCode::Interrupt)) {
+        out.cmd = "\03";
+        out.raw = "\03";
+        return out;
+    }
+
+    const auto end_pos = data.find(char(ControlCode::PacketEnd));
+
+    if (data[0] != char(ControlCode::PacketStart) || end_pos == std::string::npos) {
+        // UNREACHABLE_MSG("Malformed packet: {}", data);
+        LOG_ERROR(Debug, "Malformed packet: {}", data);
+        return out;
+    }
+
+    const std::string_view cmd_view = std::string_view(data).substr(1, end_pos - 1);
+
+    out.raw = data;
+    out.cmd = std::string(cmd_view);
+    out.arg = "";
+
+    if (cmd_view.length() == 1)
+        return out;
+
+    auto septoken = cmd_view.find_first_of(":;");
+    auto maybeNumber = cmd_view.find_first_of("-0123456789");
+    if (const size_t pos = std::min(septoken, maybeNumber); pos != std::string::npos) {
+        out.cmd = cmd_view.substr(0, pos);
+        out.arg = cmd_view.substr(pos + (pos == septoken ? 1 : 0));
+    }
 
     return out;
 }

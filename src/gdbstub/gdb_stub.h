@@ -9,19 +9,27 @@
 #include "gdb_data.h"
 #include "threadinfo.h"
 
+#include <sys/prctl.h>
+#include <sys/ptrace.h>
+#include <sys/user.h>
+#include <sys/wait.h>
+
 namespace Core::Devtools {
 
 class GdbStub {
 public:
-    explicit GdbStub(u16 port, pid_t parent);
+    explicit GdbStub(u16 port, pid_t target);
     ~GdbStub();
     bool Run();
 
-    std::string BuildThreadList();
+    std::string BuildThreadList(void);
+
+    bool CreateSocket();
 
 private:
-    static volatile sig_atomic_t stop_flag;
+    std::vector<ThreadID> children;
 
+    static volatile sig_atomic_t stop_flag;
 
     // Taken from xenia
     enum class ControlCode : char {
@@ -34,9 +42,9 @@ private:
 
     ThreadInfo* selectedThread;
 
-    pid_t pid_target;
-    pid_t pid_self;
-    u16 m_port;
+    const pid_t target_pid;
+    const pid_t self_pid;
+    const u16 m_port;
     int m_socket{};
 
     // Taken from xenia
@@ -46,15 +54,14 @@ private:
         std::string arg{};
     };
 
-    void CreateSocket();
     static bool IsValidAddress(u64 address, u64 length);
     static bool ReadMemory(u64 address, u64 length, std::string* out);
     static GdbCommand ParsePacket(const std::string& data);
     bool HandleIncomingData(const int client);
     static GdbStub::GdbCommand HandleCommand(const GdbCommand& command);
     ThreadInfo* getThreadHandleFromString(const std::string& data);
-    std::string dumpRegistersFromThread(struct user_regs_struct *regs,
-                                        struct user_fpregs_struct *fpregs);
+    std::string dumpRegistersFromThread(struct user_regs_struct* regs,
+                                        struct user_fpregs_struct* fpregs);
     std::string handler(const GdbCommand& command);
     std::string handle_v_packet(const GdbCommand& command);
     std::string handle_H_packet(const GdbCommand& command);
