@@ -19,6 +19,7 @@ public:
     void Stop(void);
 
     bool GetMessage(std::string& out);
+    bool SendMessage(std::string& in);
 
 private:
     void Loop(void);
@@ -26,10 +27,13 @@ private:
     int _port;
     std::atomic<bool> _running;
     int _socket_server;
+    std::atomic<int> _socket_client;
     std::thread _thread;
 
-    std::queue<std::string> _message_queue;
-    std::mutex _message_queue_mutex;
+    std::mutex _inbound_queue_mutex;
+    std::mutex _outbound_queue_mutex;
+    std::queue<std::string> _inbound_queue;
+    std::queue<std::string> _outbound_queue;
 };
 
 #endif // GDBSTUB_SERVER_H

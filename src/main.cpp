@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <common/types.h>
 #include <sys/prctl.h>
 #include <sys/ptrace.h>
 #include <sys/user.h>
@@ -16,9 +17,9 @@
 
 #include "gdbstub/threadinfo.h"
 // #include "gdbstub/gdb_data.h"
-// #include "gdbstub/gdb_stub.h"
 #include "gdbstub/childtools.h"
 #include "gdbstub/gdb_server.h"
+#include "gdbstub/gdb_stub.h"
 
 int main(int argc, char* argv[]) {
     pid_t parentpid = getpid();
@@ -35,25 +36,47 @@ int main(int argc, char* argv[]) {
         Common::Log::Initialize();
         Common::Log::Start();
 
-        // Core::Devtools::GdbStub stub = Core::Devtools::GdbStub(13377, target);
-
         if (!child_hijack(target)) {
             LOG_ERROR(Debug, "[-] Cannot seize thread {}", target);
             return -1;
         }
         LOG_INFO(Debug, "[*] Thread {} seized", target);
+        Core::Devtools::GdbStub::ThreadRegister(target);
 
-        /*if (!stub.CreateSocket()) {
-            LOG_ERROR(Debug, "Stub can't access socket for GDB");
-            return -1;
-        }*/
         StubServer srv(13377);
         srv.Start();
 
+        std::string response;
+
         while (1) {
+            using namespace Core::Devtools;
             std::string msg;
             if (srv.GetMessage(msg)) {
-                LOG_WARNING(Debug, "{}", msg);
+                s8 ret = GdbStub::Preprocess(msg);
+                bool isError = false;
+
+                switch (ret) {
+                case -1:
+                    isError = true;
+                    LOG_ERROR(Debug, "Error while receiving packet");
+                    break;
+                case 0:
+                    LOG_INFO(Debug, "Back to sender: {}", msg);
+                    response = msg;
+                    break;
+                case 1: {
+                    GdbStub::GdbCommand cmd = GdbStub::ParsePacket(msg);
+                    
+                    response = GdbStub::MakeResponse(GdbStub::HandlePacket(cmd));
+                    LOG_INFO(Debug, "Received data:\n\tRAW: {}\n\tCMD: {}\n\tARG: {}\n\tRESP: {}",
+                             cmd.raw, cmd.cmd, cmd.arg, response);
+                } break;
+                case 2:
+                    LOG_INFO(Debug, "Repeat response requested", response);
+                    break;
+                }
+                if (!isError)
+                    srv.SendMessage(response);
             }
 
             int status = 0;
@@ -109,14 +132,14 @@ int main(int argc, char* argv[]) {
                 ptrace(PTRACE_SETOPTIONS, new_tid, nullptr,
                        PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD);
 
+                GdbStub::ThreadRegister(new_tid);
+
                 child_continue(new_tid);
                 child_continue(tid);
-                // children.push_back(new_tid);
             }
             if (child_thread_evt_exit(status)) {
                 LOG_INFO(Debug, "[-] Thread {} ends with status {:X}", tid, status);
-                // children.erase(std::remove(children.begin(), children.end(), tid),
-                // children.end());
+                GdbStub::ThreadUnregister(tid);
                 if (tid == target) {
                     break;
                 }

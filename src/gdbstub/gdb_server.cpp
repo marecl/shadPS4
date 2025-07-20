@@ -4,7 +4,9 @@
 #include "gdb_server.h"
 
 void StubServer::Start(void) {
-    _running = true;
+    _socket_server = -1;
+    _socket_client.store(-1);
+    _running.store(true);
     _thread = std::thread(&StubServer::Loop, this);
 }
 
@@ -12,20 +14,32 @@ void StubServer::Stop(void) {
     if (!_running)
         return;
 
-    _running = false;
-    shutdown(_socket_server, SHUT_RDWR); // przerywa accept()
+    _running.store(false);
+
+    int client_socket = _socket_client.load();
+    if (client_socket != -1) {
+        close(client_socket);
+    }
+
+    shutdown(_socket_server, SHUT_RDWR);
     close(_socket_server);
     if (_thread.joinable())
         _thread.join();
 }
 
 bool StubServer::GetMessage(std::string& out) {
-    std::lock_guard<std::mutex> lock(_message_queue_mutex);
-    if (_message_queue.empty())
+    std::lock_guard<std::mutex> lock(_inbound_queue_mutex);
+    if (_inbound_queue.empty())
         return false;
 
-    out = std::move(_message_queue.front());
-    _message_queue.pop();
+    out = std::move(_inbound_queue.front());
+    _inbound_queue.pop();
+    return true;
+}
+
+bool StubServer::SendMessage(std::string& in) {
+    std::lock_guard<std::mutex> lock(_outbound_queue_mutex);
+    _outbound_queue.push(in);
     return true;
 }
 
@@ -61,21 +75,46 @@ void StubServer::Loop(void) {
     while (_running) {
         sockaddr_in client_addr{};
         socklen_t len = sizeof(client_addr);
-        int client_sock = accept(_socket_server, reinterpret_cast<sockaddr*>(&client_addr), &len);
-        if (client_sock < 0) {
+        int client = accept(_socket_server, reinterpret_cast<sockaddr*>(&client_addr), &len);
+        if (client < 0) {
             if (!_running)
                 break;
             perror("accept");
             continue;
         }
 
-        char buffer[1024] = {0};
-        ssize_t bytes = read(client_sock, buffer, sizeof(buffer) - 1);
-        if (bytes > 0) {
-            std::lock_guard<std::mutex> lock(_message_queue_mutex);
-            _message_queue.emplace(buffer);
+        _socket_client.store(client);
+
+        char inboundBuffer[1024] = {0};
+
+        while (_running) {
+            {
+                std::lock_guard<std::mutex> lock(_outbound_queue_mutex);
+                if (!_outbound_queue.empty()) {
+                    std::string msg = std::move(_outbound_queue.front());
+                    _outbound_queue.pop();
+                    ssize_t sent = send(_socket_client.load(), msg.c_str(), msg.size(), 0);
+                    if (sent == -1) {
+                        std::cout << "Error while sending message" << std::endl;
+                        break;
+                    }
+                }
+            }
+            {
+                ssize_t bytes =
+                    read(_socket_client.load(), inboundBuffer, sizeof(inboundBuffer) - 1);
+                if (bytes > 0) {
+                    std::lock_guard<std::mutex> lock(_inbound_queue_mutex);
+                    inboundBuffer[bytes] = 0;
+                    _inbound_queue.emplace(inboundBuffer);
+                }
+                if (bytes == -1) {
+                    std::cout << "Client error or disconnected" << std::endl;
+                    break;
+                }
+            }
         }
 
-        close(client_sock);
+        close(_socket_client);
     }
 }

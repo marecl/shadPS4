@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <thread>
+#include <vector>
 #include <ucontext.h>
 #include "gdb_data.h"
 #include "threadinfo.h"
@@ -16,15 +17,47 @@
 
 namespace Core::Devtools {
 
-class GdbStub {
+namespace GdbStub {
+
+#define MAX_REGISTERED_THREADS 2137
+
+struct {
+    bool running;
+    ThreadID selected_thread_idx;
+    std::vector<ThreadID> threads;
+} g_system_state;
+
+enum class ControlCode : char {
+    Ack = '+',
+    Nack = '-',
+    PacketStart = '$',
+    PacketEnd = '#',
+    Interrupt = '\03',
+};
+
+struct GdbCommand {
+    std::string raw{};
+    std::string cmd{};
+    std::string arg{};
+};
+
+std::string HandlePacket(GdbCommand cmd);
+s8 Preprocess(std::string& data);
+GdbCommand ParsePacket(const std::string data);
+std::string MakeResponse(const std::string response);
+
+void ThreadRegister(ThreadID id);
+void ThreadUnregister(ThreadID id);
+
+} // namespace GdbStub
+/*
+class GdbStub2 {
 public:
-    explicit GdbStub(u16 port, pid_t target);
-    ~GdbStub();
+    explicit GdbStub2(pid_t target);
+    ~GdbStub2();
     bool Run();
 
     std::string BuildThreadList(void);
-
-    bool CreateSocket();
 
 private:
     std::vector<ThreadID> children;
@@ -44,15 +77,13 @@ private:
 
     const pid_t target_pid;
     const pid_t self_pid;
-    const u16 m_port;
-    int m_socket{};
 
     // Taken from xenia
-    struct GdbCommand {
+    typedef struct _GdbCommand {
         std::string raw{};
         std::string cmd{};
         std::string arg{};
-    };
+    } GdbCommand;
 
     static bool IsValidAddress(u64 address, u64 length);
     static bool ReadMemory(u64 address, u64 length, std::string* out);
@@ -69,6 +100,6 @@ private:
     std::string handle_Q_packet(const GdbCommand& command) {
         return "E.Stub";
     }
-};
+};*/
 
 } // namespace Core::Devtools

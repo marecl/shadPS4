@@ -30,6 +30,103 @@ using namespace ::Libraries::Kernel;
 
 namespace Core::Devtools {
 
+namespace GdbStub {
+
+constexpr auto OK = "OK";
+constexpr auto E01 = "E01";
+
+std::string HandlePacket(GdbCommand cmd) {
+
+    if(cmd.cmd == "qSupported"){
+        return "PacketSize=1024";
+    }
+
+    return "";
+}
+
+/*
+Arg: input from GDB
+Ret:
+-1 error
+0 return input directly to sender
+1 pass on for processing
+2 repeat last response
+*/
+s8 Preprocess(std::string& data) {
+
+    if (data.empty())
+        return -1;
+
+    if (data == "+") {
+        return 0;
+    }
+
+    if (data == "\03") {
+        return 1;
+    }
+
+    if (data.front() == char(ControlCode::Ack)) {
+        data = data.substr(1);
+    }
+
+    return 1;
+}
+
+GdbCommand ParsePacket(const std::string data) {
+    GdbCommand out;
+    out.raw = "";
+    out.cmd = "";
+    out.arg = "";
+
+    if (data.front() == char(ControlCode::Interrupt)) {
+        out.cmd = "\03";
+        out.raw = "\03";
+        return out;
+    }
+
+    const auto end_pos = data.find(char(ControlCode::PacketEnd));
+
+    if (data[0] != char(ControlCode::PacketStart) || end_pos == std::string::npos) {
+        // UNREACHABLE_MSG("Malformed packet: {}", data);
+        LOG_ERROR(Debug, "Malformed packet: {}", data);
+        return out;
+    }
+
+    const std::string_view cmd_view = std::string_view(data).substr(1, end_pos - 1);
+
+    out.raw = data;
+    out.cmd = std::string(cmd_view);
+    out.arg = "";
+
+    if (cmd_view.length() == 1)
+        return out;
+
+    auto septoken = cmd_view.find_first_of(":;");
+    auto maybeNumber = cmd_view.find_first_of("-0123456789");
+    if (const size_t pos = std::min(septoken, maybeNumber); pos != std::string::npos) {
+        out.cmd = cmd_view.substr(0, pos);
+        out.arg = cmd_view.substr(pos + (pos == septoken ? 1 : 0));
+    }
+
+    return out;
+}
+std::string MakeResponse(const std::string response) {
+    return "+$" + response + "#" + fmt::format("{:02X}", CalculateChecksum(response));
+}
+
+void ThreadRegister(ThreadID id) {
+    g_system_state.threads.push_back(id);
+}
+void ThreadUnregister(ThreadID id) {
+    auto& threads = g_system_state.threads;
+    threads.erase(std::remove(threads.begin(), threads.end(), id));
+}
+
+} // namespace GdbStub
+
+} // namespace Core::Devtools
+
+/*
 constexpr auto OK = "OK";
 constexpr auto E01 = "E01";
 
@@ -39,70 +136,14 @@ constexpr char target_description[] = R"(l<?xml version="1.0"?>
   <architecture>i386:x86-64</architecture>
 </target>)";
 
-GdbStub::GdbStub(const u16 port, pid_t target_pid)
-    : m_port(port), target_pid(target_pid), self_pid(getpid()) {
-
-    selectedThread = nullptr;
-}
-
-GdbStub::~GdbStub() {}
-
-static std::atomic<int> client_sock{-1};
-static std::thread* listener;
-
-void wait_for_client(int server_sock) {
-    sockaddr_in client_addr{};
-    socklen_t client_len = sizeof(client_addr);
-
-    int sock = accept(server_sock, (sockaddr*)&client_addr, &client_len);
-    if (sock < 0) {
-        std::cerr << "Błąd accept()\n";
-        return;
-    }
-
-    std::cout << "[+] Klient połączony!\n";
-    client_sock.store(sock); // ustawiamy jako atomowy
-}
-
-bool GdbStub::CreateSocket() {
-    m_socket = socket(AF_INET, SOCK_STREAM, 0);
-    ASSERT_MSG(m_socket != -1, "Failed to create socket ({})", strerror(errno));
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(m_port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
-    ASSERT_MSG(bind(m_socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != -1,
-               "Failed to bind socket ({})", strerror(errno));
-
-    if (listen(m_socket, 1) == -1) {
-        std::cout << "Failed to listen on socket (" << strerror(errno) << ")" << std::endl;
-        close(m_socket);
-        return false;
-    }
-    std::cout << "GDB stub listening on port " << m_port << std::endl;
-    //listener = new (std::thread(wait_for_client, m_socket));
-
-    return true;
-}
-
 static std::string prevMsg;
 
-bool GdbStub::HandleIncomingData(const int client) {
-    char buf[1024];
-    memset(buf, 0, sizeof(buf));
-    const ssize_t bytes = recv(client, buf, sizeof(buf), 0);
-    if (bytes == -1 || bytes == 0) {
-        return false;
-    }
+bool GdbStub2::HandleIncomingData(const int client) {
 
-    std::string data(buf, bytes);
-
-    if (data.empty()) {
-        return false;
-    }
-
+    //  if (data.empty()) {
+    //       return false;
+    //  }
+    std::string data;
     if (data == "+") {
         // Connection acknowledgement
         send(client, "+", 1, 0);
@@ -117,7 +158,7 @@ bool GdbStub::HandleIncomingData(const int client) {
         data = data.substr(1);
     }
 
-    GdbCommand command = ParsePacket(data);
+    GdbCommand command = GdbCommand(); // ParsePacket(data);
     std::string response = handler(command);
     std::string msg = MakeResponse(response);
     prevMsg = msg;
@@ -136,27 +177,13 @@ bool GdbStub::HandleIncomingData(const int client) {
     return true;
 }
 
-bool GdbStub::Run() {
-    if (client_sock.load() == -1)
-        return true;
-    const int client = client_sock.load();
-    client_sock.store(-1);
+bool GdbStub2::Run() {
 
-    LOG_INFO(Debug, "Client {} connected", client_sock.load());
-
-    // BuildThreadList();
-
-    while (true) {
-        HandleIncomingData(client);
-    }
-
-    close(m_socket);
-
-    LOG_INFO(Debug, "Stub exited");
-    return true;
+    // HandleIncomingData(client);
+    return false;
 }
 
-std::string GdbStub::handler(const GdbCommand& command) {
+std::string GdbStub2::handler(const GdbCommand& command) {
 
     if (command.cmd == "qAttached")
         return "1";
@@ -172,13 +199,13 @@ std::string GdbStub::handler(const GdbCommand& command) {
         // No point of supporting that (change my mind)
         return "";
     case '?':
-        /*        for (u16 idx = 0; idx < shd->size; idx++) {
+               for (u16 idx = 0; idx < shd->size; idx++) {
                     struct ThreadInfo* thd = &shd->threads[idx];
                     ptrace(PTRACE_SEIZE, thd->tid, nullptr, nullptr);
                     ptrace(PTRACE_INTERRUPT, thd->tid, nullptr, nullptr);
                     waitpid(thd->tid, nullptr, 0);
                 }
-                process_stop(shd, pid_target);*/
+                process_stop(shd, pid_target);
 
         return "S05";
 
@@ -186,11 +213,11 @@ std::string GdbStub::handler(const GdbCommand& command) {
         // kill(target_pid, SIGCONT);
         // waitpid(target_pid, nullptr, 0);
         return "S09";
-        /*for (u16 idx = 0; idx < shd->size; idx++) {
+        for (u16 idx = 0; idx < shd->size; idx++) {
             struct ThreadInfo* thd = &shd->threads[idx];
             ptrace(PTRACE_CONT, thd->tid, nullptr, nullptr);
             waitpid(thd->tid, nullptr, 0);
-        }*/
+        }
 
         // if (DebugState.IsGuestThreadsPaused())
         //     DebugState.ResumeGuestThreads();
@@ -201,7 +228,7 @@ std::string GdbStub::handler(const GdbCommand& command) {
         break;
     case 'g':
         return "00000000000000000000000000000000";
-        /*{
+        {
             struct ThreadInfo* target = getThreadByName(shd, GAME_MAIN_THREAD_NAME);
             struct user_regs_struct regs;
             struct user_fpregs_struct fpregs;
@@ -210,7 +237,7 @@ std::string GdbStub::handler(const GdbCommand& command) {
 
             LOG_ERROR(Debug, "Dumping thread registers: {} ({:x})", target->name, target->tid);
             return dumpRegistersFromThread(&regs, &fpregs);
-        } */
+        }
         break; // read general registers
     case 'G':
         break; // write general registers
@@ -252,7 +279,7 @@ std::string GdbStub::handler(const GdbCommand& command) {
 }
 
 // Modified from xenia a little bit
-std::string GdbStub::BuildThreadList() {
+std::string GdbStub2::BuildThreadList() {
 
     std::string buffer;
     buffer += "l<?xml version=\"1.0\"?>\n<threads>\n";
@@ -261,8 +288,8 @@ std::string GdbStub::BuildThreadList() {
     buffer += "</threads>";
     return buffer;
 }
-std::string GdbStub::dumpRegistersFromThread(struct user_regs_struct* regs,
-                                             struct user_fpregs_struct* fpregs) {
+std::string GdbStub2::dumpRegistersFromThread(struct user_regs_struct* regs,
+                                              struct user_fpregs_struct* fpregs) {
     std::string out = "";
 
     out = out + byteSwap(regs->rax, sizeof(unsigned long long));
@@ -286,42 +313,4 @@ std::string GdbStub::dumpRegistersFromThread(struct user_regs_struct* regs,
 
     return out;
 }
-GdbStub::GdbCommand GdbStub::ParsePacket(const std::string& data) {
-    GdbCommand out;
-    out.raw = "";
-    out.cmd = "";
-    out.arg = "";
-
-    if (data.front() == char(ControlCode::Interrupt)) {
-        out.cmd = "\03";
-        out.raw = "\03";
-        return out;
-    }
-
-    const auto end_pos = data.find(char(ControlCode::PacketEnd));
-
-    if (data[0] != char(ControlCode::PacketStart) || end_pos == std::string::npos) {
-        // UNREACHABLE_MSG("Malformed packet: {}", data);
-        LOG_ERROR(Debug, "Malformed packet: {}", data);
-        return out;
-    }
-
-    const std::string_view cmd_view = std::string_view(data).substr(1, end_pos - 1);
-
-    out.raw = data;
-    out.cmd = std::string(cmd_view);
-    out.arg = "";
-
-    if (cmd_view.length() == 1)
-        return out;
-
-    auto septoken = cmd_view.find_first_of(":;");
-    auto maybeNumber = cmd_view.find_first_of("-0123456789");
-    if (const size_t pos = std::min(septoken, maybeNumber); pos != std::string::npos) {
-        out.cmd = cmd_view.substr(0, pos);
-        out.arg = cmd_view.substr(pos + (pos == septoken ? 1 : 0));
-    }
-
-    return out;
-}
-} // namespace Core::Devtools
+*/
