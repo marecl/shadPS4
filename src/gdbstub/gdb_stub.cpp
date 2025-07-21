@@ -37,13 +37,69 @@ constexpr const char* OK = "OK";
 constexpr const char* E01 = "E01";
 constexpr const char* touch_grass = "UwU";
 
+// -1 error, 0 don't send, 1 send
+LoopAction Loop(std::string message, std::string& response) {
+    s8 ret = GdbStub::Preprocess(message);
+    bool send_response = true;
+
+    if (ret == -1) {
+        LOG_ERROR(Debug, "Error while receiving packet");
+        return LoopAction::ERROR;
+    }
+    if (ret == 0) {
+        // '+' packet, ACK
+        return LoopAction::BACK_TO_SENDER;
+    }
+    if (ret == 2) {
+        // '-' packet, repeat last response
+        return LoopAction::REPEAT;
+    }
+
+    if (ret != 1) {
+        LOG_ERROR(Debug, "This shouldn't happen");
+        return LoopAction::ERROR;
+    }
+
+    GdbCommand cmd = GdbStub::ParsePacket(message);
+    LOG_INFO(Debug, "Received data:\n\tRAW: {}\n\tCMD: {}\n\tARG: {}", cmd.raw, cmd.cmd, cmd.arg);
+
+    s8 open_ended_handler_status = GdbStub::HandleContinuous(cmd);
+
+    if (open_ended_handler_status == -1) {
+        LOG_ERROR(Debug, "Some error. Investigate into GdbStub::HandleContinuous");
+        response = GdbStub::E01;
+        return LoopAction::ERROR;
+    }
+
+    if (open_ended_handler_status == 1) {
+        LOG_INFO(Debug, "No response to GDB", response);
+        return LoopAction::NOSEND;
+    }
+
+    if (open_ended_handler_status == 0) {
+        std::string handler_effect = GdbStub::HandlePacket(cmd);
+        if (handler_effect == GdbStub::touch_grass) {
+            LOG_INFO(Debug, "Exit requested", response);
+            response = GdbStub::OK;
+            return LoopAction::EXIT;
+        }
+
+        LOG_INFO(Debug, "Sent response:\n\tRES: {}", response);
+        response = handler_effect;
+        return LoopAction::SEND;
+    }
+
+    return LoopAction::ERROR;
+}
+
 // -1 fail, 0 N/A, 1 Action done
 // doesn't return anything to client
 s8 HandleContinuous(GdbCommand cmd) {
     char maincmd = cmd.cmd[0];
     if (maincmd == 'c') {
-        LOG_WARNING(Debug, "stub, add SIG argument, check if target(s) is running already, maybe "
-                           "add continue address??");
+        // TODO: throw out somewhere
+        LOG_WARNING(Debug, "stub. add SIG argument. don't continue if already running (or it will "
+                           "throw an error). ??maybe continuation address??");
         ThreadID target = g_system_state.thread_sel_flow;
         u8 sig = 0; // take from the argument
 
@@ -51,8 +107,9 @@ s8 HandleContinuous(GdbCommand cmd) {
             LOG_ERROR(Debug, "GDB Continuing thread ", target);
             if (!child_continue(target, sig)) {
                 LOG_ERROR(Debug, "GDB Can't continue thread {}", target);
+                return -1;
             }
-            return -1;
+            return 1;
         }
 
         LOG_ERROR(Debug, "Continuing all threads");
@@ -75,19 +132,20 @@ std::string HandlePacket(GdbCommand cmd) {
     char maincmd = cmd.cmd[0];
 
     if (maincmd == 'D') {
-        LOG_WARNING(Debug, "Detach -- stub");
         return touch_grass;
     }
 
     if (maincmd == '\03') {
-        LOG_WARNING(Debug, "stub");
+        // TODO: throw out somewhere
+        LOG_WARNING(Debug, "stub. confirm if interrupting an already stopped thread will cause "
+                           "ptrace() to throw a fail (even though it's stopped)");
 
         int status;
         pid_t waitpid_responder;
 
         ThreadID target = g_system_state.thread_sel_flow;
         if (target != -1) {
-            LOG_ERROR(Debug, "Interrupting thread {}", target);
+            LOG_INFO(Debug, "Interrupting thread {}", target);
             if (ptrace(PTRACE_INTERRUPT, target, nullptr, nullptr) == -1) {
                 LOG_ERROR(Debug, "GDB Can't stop thread {}", target);
                 return E01;
@@ -101,7 +159,7 @@ std::string HandlePacket(GdbCommand cmd) {
         }
 
         // else is omitted, if not selected we want all threads
-        LOG_ERROR(Debug, "Interrupting all threads");
+        LOG_INFO(Debug, "Interrupting all threads");
         bool wasError = false;
         for (auto [tid, _] : g_system_state.threads) {
             if (ptrace(PTRACE_INTERRUPT, tid, nullptr, nullptr) == -1) {
@@ -122,6 +180,7 @@ std::string HandlePacket(GdbCommand cmd) {
                 continue;
             }
 
+            // FFS TODO: see which one is actually effective. works for now.
             if (!child_thread_stopped(status))
                 continue;
 
@@ -138,7 +197,7 @@ std::string HandlePacket(GdbCommand cmd) {
             }
 
             if (std::erase(stopped_threads_NOT, waitpid_responder) == 0) {
-                LOG_ERROR(Debug, "An untraced child thread did something funky wunky");
+                LOG_ERROR(Debug, "One thread did something funky wunky");
             }
             all_stopped = stopped_threads_NOT.empty();
         }
@@ -154,11 +213,15 @@ std::string HandlePacket(GdbCommand cmd) {
 
     if (maincmd == '?') {
         LOG_WARNING(Debug, "stub, update stop reason signal,change to T ???and list threads??");
-        // it WILL mess up GDB if it's running before it initializes everything
-        return "T05";//"running"; // g_system_state.running ? "OK" : "T05";
+        // so...
+        // we need to lie and say the program is stopped
+        // otherwise gdb gets into a weird limbo state, what can only be resolved by yeeting it into
+        // oblivion shad works nice tho
+        return "T05";
     }
 
     if (maincmd == 'm') {
+        LOG_WARNING(Debug, "Stub. May crash on backtrace in gdb. Check boundaries and stuff");
         u8 sepidx = cmd.arg.find(',');
         u64 addr = std::stoull(cmd.arg.substr(0, sepidx), nullptr, 16);
         u64 len = std::stoull(cmd.arg.substr(sepidx + 1), nullptr, 16);
@@ -196,9 +259,9 @@ std::string HandlePacket(GdbCommand cmd) {
         default:
             break;
         case 0x3A:
-            return byteSwap(g_system_state.user_regs.fs_base, 16);
+            return ByteSwap(g_system_state.user_regs.fs_base, 16);
         case 0x3B:
-            return byteSwap(g_system_state.user_regs.gs_base, 16);
+            return ByteSwap(g_system_state.user_regs.gs_base, 16);
         }
         return "xxxxxxxxxxxxxxxx";
     }
@@ -251,7 +314,7 @@ std::string HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'q') {
-        const std::vector<std::string> argTokens = split(cmd.arg, ':');
+        const std::vector<std::string> argTokens = Split(cmd.arg, ':');
 
         if (cmd.cmd[1] == 'T') {
             // I think qT packets can be safely ignored
@@ -268,8 +331,10 @@ std::string HandlePacket(GdbCommand cmd) {
             return "1";
         }
         if (cmd.cmd == "qSupported") {
-            // QThreadEvents+ces
-            std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+;binary-upload+";
+            // QThreadEvents+ces - probably necessary in the near future
+            // binary-upload+ - unnecessary for now, maybe ever
+            std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+";
+            // just in case i'm far enough to need breakpoints
             if (resp.find("swbreak+"))
                 resp += ";swbreak+";
             return resp;
@@ -277,6 +342,9 @@ std::string HandlePacket(GdbCommand cmd) {
 
         if (cmd.cmd == "qXfer") {
             if (argTokens[1] == "read") {
+                if (argTokens[0] == "threads") {
+                    return ThreadList();
+                }
                 // keep this commented
                 // for now we use builtin i386:x86-64 definition, unless specified by PS4 arch
                 // (user must specify this in local config to take effect, otherwise gdb assumes
@@ -287,9 +355,6 @@ std::string HandlePacket(GdbCommand cmd) {
                         ;
                     }
                 }*/
-                if (argTokens[0] == "threads") {
-                    return ThreadList();
-                }
             }
         }
     }
@@ -366,14 +431,9 @@ GdbCommand ParsePacket(const std::string data) {
 
     return out;
 }
-std::string MakeResponse(const std::string response) {
-    // compressed response
-    // std::string cpr{};
-    // cpr = std::regex_replace(response, std::regex("0000"), "0* ");
-    // return "+$" + cpr + "#" + fmt::format("{:02X}", CalculateChecksum(cpr));
 
-    // regular response
-    return "+$" + response + "#" + fmt::format("{:02X}", CalculateChecksum(response));
+std::string MakeResponse(const std::string msg) {
+    return MakeResponseImpl(msg);
 }
 
 void ThreadRegister(ThreadID tid) {
@@ -428,48 +488,40 @@ bool ReadMemory(const u64 address, const u64 length, std::string* out) {
 }
 
 // we need this to map user_regs_struct to GDB
+// exact order **must** follow GDBs order
+// either in gdb/features/i386/64bit-core OR
+// see what's the order in `info reg` OR
+// `maint print register-groups` with option `set architecture i386:x86-64`
 #define X86_64_REG_COUNT 24
 const u16 user_reg_size[X86_64_REG_COUNT] = {8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
                                              8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 4};
-const u16 user_reg_offsets[X86_64_REG_COUNT] = {offsetof(struct user_regs_struct, rax),
-                                                offsetof(struct user_regs_struct, rbx),
-                                                offsetof(struct user_regs_struct, rcx),
-                                                offsetof(struct user_regs_struct, rdx),
-                                                offsetof(struct user_regs_struct, rsi),
-                                                offsetof(struct user_regs_struct, rdi),
-                                                offsetof(struct user_regs_struct, rbp),
-                                                offsetof(struct user_regs_struct, rsp),
-                                                offsetof(struct user_regs_struct, r8),
-                                                offsetof(struct user_regs_struct, r9),
-                                                offsetof(struct user_regs_struct, r10),
-                                                offsetof(struct user_regs_struct, r11),
-                                                offsetof(struct user_regs_struct, r12),
-                                                offsetof(struct user_regs_struct, r13),
-                                                offsetof(struct user_regs_struct, r14),
-                                                offsetof(struct user_regs_struct, r15),
-                                                offsetof(struct user_regs_struct, rip),
-                                                offsetof(struct user_regs_struct, eflags),
-                                                offsetof(struct user_regs_struct, cs),
-                                                offsetof(struct user_regs_struct, ss),
-                                                offsetof(struct user_regs_struct, ds),
-                                                offsetof(struct user_regs_struct, es),
-                                                offsetof(struct user_regs_struct, fs),
-                                                offsetof(struct user_regs_struct, gs)
-
-};
+const u16 user_reg_offsets[X86_64_REG_COUNT] = {
+    offsetof(struct user_regs_struct, rax), offsetof(struct user_regs_struct, rbx),
+    offsetof(struct user_regs_struct, rcx), offsetof(struct user_regs_struct, rdx),
+    offsetof(struct user_regs_struct, rsi), offsetof(struct user_regs_struct, rdi),
+    offsetof(struct user_regs_struct, rbp), offsetof(struct user_regs_struct, rsp),
+    offsetof(struct user_regs_struct, r8),  offsetof(struct user_regs_struct, r9),
+    offsetof(struct user_regs_struct, r10), offsetof(struct user_regs_struct, r11),
+    offsetof(struct user_regs_struct, r12), offsetof(struct user_regs_struct, r13),
+    offsetof(struct user_regs_struct, r14), offsetof(struct user_regs_struct, r15),
+    offsetof(struct user_regs_struct, rip), offsetof(struct user_regs_struct, eflags),
+    offsetof(struct user_regs_struct, cs),  offsetof(struct user_regs_struct, ss),
+    offsetof(struct user_regs_struct, ds),  offsetof(struct user_regs_struct, es),
+    offsetof(struct user_regs_struct, fs),  offsetof(struct user_regs_struct, gs)};
 
 std::string PrintRegisters(const struct user_regs_struct* regs,
                            const struct user_fpregs_struct* fpregs) {
-
     std::string out = "";
 
+    // why map all registers when we have a copy in a known place
+    // and thanks to preprocessor we have exact offsets of its members
     const void* base = static_cast<const void*>(regs);
     for (u8 idx = 0; idx < X86_64_REG_COUNT; idx++) {
         u8 reg_size = user_reg_size[idx]; // bytes
         size_t offset = user_reg_offsets[idx];
         u64 buf = 0;
         memcpy(&buf, static_cast<const u8*>(base) + offset, reg_size);
-        out = out + byteSwap(buf, reg_size * 2);
+        out = out + ByteSwap(buf, reg_size * 2);
     }
 
     // Uncomment for some insider knowledge

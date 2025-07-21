@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 #ifndef GDBSTUB_SERVER_H
 #define GDBSTUB_SERVER_H
 
@@ -19,7 +22,7 @@ public:
     bool ClientConnected(void);
 
     bool GetMessage(std::string& out);
-    bool SendMessage(std::string& in);
+    bool SendMessage(std::string in);
 
 private:
     void Loop(void);

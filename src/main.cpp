@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstdio>
@@ -25,7 +25,7 @@ int main(int argc, char* argv[]) {
     pid_t target = fork();
 
     if (target == 0) {
-        auto ret = mainReal(argc, argv);
+        auto ret = MainReal(argc, argv);
         exit(ret);
 
     } else if (target > 0) {
@@ -69,53 +69,32 @@ int main(int argc, char* argv[]) {
 
         bool do_continue_what_you_do = true;
         while (do_continue_what_you_do) {
-            // looks pretty generic too
             using namespace Core::Devtools;
 
             if (srv.GetMessage(msg)) {
-                s8 ret = GdbStub::Preprocess(msg);
-                bool send_response = true;
+                GdbStub::LoopAction send_response = GdbStub::Loop(msg, response);
 
-                switch (ret) {
-                case -1:
-                    send_response = false;
-                    LOG_ERROR(Debug, "Error while receiving packet");
+                switch (send_response) {
+                case GdbStub::LoopAction::ERROR:
+                    srv.SendMessage(GdbStub::MakeResponse(GdbStub::E01));
                     break;
-                case 0:
-                    // LOG_INFO(Debug, "Back to sender: {}", msg);
+                case GdbStub::LoopAction::EXIT:
+                    do_continue_what_you_do = false;
+                    break;
+                case GdbStub::LoopAction::BACK_TO_SENDER:
                     response = msg;
                     break;
-                case 1: {
-                    response = "";
-                    cmd = GdbStub::ParsePacket(msg);
-                    s8 openEndedHandlerStatus = GdbStub::HandleContinuous(cmd);
-
-                    if (openEndedHandlerStatus == -1) {
-                        LOG_ERROR(Debug, "Some error. Investigate into GdbStub::HandleContinuous");
-                        response = GdbStub::E01;
-                    } else if (openEndedHandlerStatus == 0) {
-                        // Needs the response
-                        std::string handler_effect = GdbStub::HandlePacket(cmd);
-                        if (handler_effect == GdbStub::touch_grass) {
-                            do_continue_what_you_do = false;
-                            handler_effect = GdbStub::OK;
-                        }
-
-                        response = GdbStub::MakeResponse(handler_effect);
-                    } else {
-                        // all errors were already disclosed
-                        send_response = false;
-                    }
-                    LOG_INFO(Debug, "Received data:\n\tRAW: {}\n\tCMD: {}\n\tARG: {}\n\tRESP: {}",
-                             cmd.raw, cmd.cmd, cmd.arg, response);
-                } break;
-                case 2:
-                    LOG_INFO(Debug, "Repeat response requested: {}", response);
+                case GdbStub::LoopAction::REPEAT:
+                    // Response is unmodified
+                    srv.SendMessage(GdbStub::MakeResponse(response));
+                    break;
+                case GdbStub::LoopAction::SEND:
+                    // Response is modified
+                    srv.SendMessage(GdbStub::MakeResponse(response));
+                    break;
+                case GdbStub::LoopAction::NOSEND:
                     break;
                 }
-
-                if (send_response)
-                    srv.SendMessage(response);
             }
             // end of generic
 

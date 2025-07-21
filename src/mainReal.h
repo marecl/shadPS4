@@ -4,6 +4,6 @@
 #ifndef MAIN_REAL_H
 #define MAIN_REAL_H
 
-int mainReal(int argc, char* argv[]);
+int MainReal(int argc, char* argv[]);
 
 #endif // MAIN_REAL_H

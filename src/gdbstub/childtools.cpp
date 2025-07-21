@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 #include "childtools.h"
 
 #include <fstream>
@@ -6,22 +9,48 @@
 #include <sys/wait.h>
 #include "threadinfo.h"
 
-bool child_continue(ThreadID tid, int signal) {
-    return ptrace(PTRACE_CONT, tid, NULL, signal) != -1;
+bool child_continue(ThreadID target, int signal) {
+    return ptrace(PTRACE_CONT, target, NULL, signal) != -1;
 }
 
 bool child_hijack(ThreadID target) {
-    ThreadID targetTID = waitpid(target, nullptr, WSTOPPED);
-    if (targetTID != target)
+    ThreadID stopped_thread = waitpid(target, nullptr, WSTOPPED);
+    if (stopped_thread != target)
         return false;
 
-    if (ptrace(PTRACE_SEIZE, targetTID, NULL, NULL) == -1)
+    if (ptrace(PTRACE_SEIZE, stopped_thread, NULL, NULL) == -1)
         return false;
-    if (ptrace(PTRACE_SETOPTIONS, targetTID, 0,
+    if (ptrace(PTRACE_SETOPTIONS, stopped_thread, 0,
                PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD) == -1)
         return false;
 
     return true;
+}
+
+bool child_thread_dump_regs(ThreadID target, struct user_regs_struct* regs,
+                            struct user_fpregs_struct* fpregs) {
+    if (ptrace(PTRACE_GETREGS, target, nullptr, regs) == -1) {
+        return false;
+    }
+    if (ptrace(PTRACE_GETFPREGS, target, nullptr, fpregs) == -1) {
+        return false;
+    }
+
+    return true;
+}
+
+std::string child_thread_name(ThreadID target) {
+    // pthread can't pull out name if it belongs to other process
+    // just... really?
+    // pthread_getname_np(target, buf, 16);
+
+    std::ifstream thread_name_file_unix(std::format("/proc/{}/comm", target));
+    if (!thread_name_file_unix.is_open()) {
+        return {};
+    }
+    std::string name;
+    std::getline(thread_name_file_unix, name);
+    return name;
 }
 
 bool child_thread_stopped(int status) {
@@ -58,30 +87,4 @@ bool child_thread_evt_exit(int status) {
 
 bool child_thread_sigtrap_is_syscall(int status) {
     return status >> 8 == (SIGTRAP | 0x80);
-}
-
-bool child_thread_dump_regs(ThreadID tid, struct user_regs_struct* regs,
-                            struct user_fpregs_struct* fpregs) {
-    if (ptrace(PTRACE_GETREGS, tid, nullptr, regs) == -1) {
-        return false;
-    }
-    if (ptrace(PTRACE_GETFPREGS, tid, nullptr, fpregs) == -1) {
-        return false;
-    }
-
-    return true;
-}
-
-std::string child_thread_name(ThreadID tid) {
-    // pthread can't pull out name if it belongs to other process
-    // just... really?
-    // pthread_getname_np(tid, buf, 16);
-
-    std::ifstream commFile(std::format("/proc/{}/comm", tid));
-    if (!commFile.is_open()) {
-        return {};
-    }
-    std::string name;
-    std::getline(commFile, name);
-    return name;
 }

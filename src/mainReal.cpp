@@ -19,7 +19,7 @@
 #include <windows.h>
 #endif
 
-int mainReal(int argc, char* argv[]) {
+int MainReal(int argc, char* argv[]) {
     raise(SIGSTOP);
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);

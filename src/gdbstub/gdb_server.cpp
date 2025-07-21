@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 #include <iostream>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -16,9 +19,9 @@ void StubServer::Stop(void) {
 
     _running.store(false);
 
-    int client_socket = _socket_client.load();
-    if (client_socket != -1) {
-        close(client_socket);
+    int socket_client = _socket_client.load();
+    if (socket_client != -1) {
+        close(socket_client);
     }
 
     shutdown(_socket_server, SHUT_RDWR);
@@ -41,7 +44,7 @@ bool StubServer::GetMessage(std::string& out) {
     return true;
 }
 
-bool StubServer::SendMessage(std::string& in) {
+bool StubServer::SendMessage(std::string in) {
 
     ssize_t sent = send(_socket_client.load(), in.c_str(), in.size(), 0);
     if (sent == -1) {

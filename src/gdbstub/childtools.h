@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 #ifndef CHILDTOOLS_H
 #define CHILDTOOLS_H
@@ -7,9 +9,11 @@
 
 #include "threadinfo.h"
 
-bool child_continue(ThreadID tid, int signal = 0);
-
+bool child_continue(ThreadID target, int signal = 0);
 bool child_hijack(ThreadID target);
+bool child_thread_dump_regs(ThreadID target, struct user_regs_struct* regs,
+                            struct user_fpregs_struct* fpregs);
+std::string child_thread_name(ThreadID target);
 
 bool child_thread_stopped(int status);
 int child_thread_stop_reason(int status);
@@ -21,8 +25,5 @@ bool child_thread_evt_clone(int status);
 bool child_thread_evt_exit(int status);
 bool child_thread_sigtrap_is_syscall(int status);
 
-bool child_thread_dump_regs(ThreadID tid, struct user_regs_struct* regs,
-                            struct user_fpregs_struct* fpregs);
-std::string child_thread_name(ThreadID tid);
 
 #endif // CHILDTOOLS_H
