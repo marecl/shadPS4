@@ -64,19 +64,22 @@ int main(int argc, char* argv[]) {
         Core::Devtools::GdbStub::g_system_state.thread_main = target;
 
         // keep there for '-' packet
-        std::string response;
+        std::string response{};
+        std::string msg{};
+        Core::Devtools::GdbStub::GdbCommand cmd;
 
-        while (1) {
+        bool do_continue_what_you_do = true;
+        while (do_continue_what_you_do) {
             // looks pretty generic too
             using namespace Core::Devtools;
-            std::string msg;
+
             if (srv.GetMessage(msg)) {
                 s8 ret = GdbStub::Preprocess(msg);
-                bool isError = false;
+                bool send_response = true;
 
                 switch (ret) {
                 case -1:
-                    isError = true;
+                    send_response = false;
                     LOG_ERROR(Debug, "Error while receiving packet");
                     break;
                 case 0:
@@ -84,9 +87,26 @@ int main(int argc, char* argv[]) {
                     response = msg;
                     break;
                 case 1: {
-                    GdbStub::GdbCommand cmd = GdbStub::ParsePacket(msg);
+                    response = "";
+                    cmd = GdbStub::ParsePacket(msg);
+                    s8 openEndedHandlerStatus = GdbStub::HandleContinuous(cmd);
 
-                    response = GdbStub::MakeResponse(GdbStub::HandlePacket(cmd));
+                    if (openEndedHandlerStatus == -1) {
+                        LOG_ERROR(Debug, "Some error. Investigate into GdbStub::HandleContinuous");
+                        response = GdbStub::E01;
+                    } else if (openEndedHandlerStatus == 0) {
+                        // Needs the response
+                        std::string handler_effect = GdbStub::HandlePacket(cmd);
+                        if (handler_effect == GdbStub::touch_grass) {
+                            do_continue_what_you_do = false;
+                            handler_effect = GdbStub::OK;
+                        }
+
+                        response = GdbStub::MakeResponse(handler_effect);
+                    } else {
+                        // all errors were already disclosed
+                        send_response = false;
+                    }
                     LOG_INFO(Debug, "Received data:\n\tRAW: {}\n\tCMD: {}\n\tARG: {}\n\tRESP: {}",
                              cmd.raw, cmd.cmd, cmd.arg, response);
                 } break;
@@ -94,7 +114,8 @@ int main(int argc, char* argv[]) {
                     LOG_INFO(Debug, "Repeat response requested: {}", response);
                     break;
                 }
-                if (!isError)
+
+                if (send_response)
                     srv.SendMessage(response);
             }
             // end of generic
@@ -123,18 +144,23 @@ int main(int argc, char* argv[]) {
                                       tid, regs.rip, regs.rip - 0x7FF000000);
                         }
                         child_continue(tid, SIGSEGV);
+                        // I might regret adding this
+                        //GdbStub::g_system_state.running = true;
                     }
 
                 } else if (child_thread_stop_reason(status) == SIGTRAP) {
                     LOG_INFO(Debug, "[*] Thread {} got SIGTRAP {:X}", tid,
                              child_thread_stop_reason(status));
+                    //GdbStub::g_system_state.running = false;
                 } else if (child_thread_sigtrap_is_syscall(status)) {
                     LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP {:X}", tid,
                              child_thread_stop_reason(status));
+                    //GdbStub::g_system_state.running = false;
                     // child_continue(tid);
                 } else {
                     LOG_INFO(Debug, "[*] Thread {} stopped with signal {:X}", tid,
                              child_thread_stop_reason(status));
+                    //GdbStub::g_system_state.running = false;
                 }
 
             } else if (child_thread_exited(status)) {
@@ -159,6 +185,7 @@ int main(int argc, char* argv[]) {
 
                 child_continue(new_tid);
                 child_continue(tid);
+                //GdbStub::g_system_state.running = true;
             }
             if (child_thread_evt_exit(status)) {
                 LOG_INFO(Debug, "[-] Thread {} ends with status {:X}", tid, status);

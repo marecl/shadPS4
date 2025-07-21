@@ -14,6 +14,7 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 
+#include "childtools.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/logging/backend.h"
@@ -24,7 +25,6 @@
 #include "core/memory.h"
 #include "core/thread.h"
 #include "gdb_stub.h"
-#include "processtools.h"
 #include "stubtools.h"
 #include "threadinfo.h"
 
@@ -34,24 +34,135 @@ namespace Core::Devtools {
 
 namespace GdbStub {
 
-struct system_state_t g_system_state = {.running = false,
+struct system_state_t g_system_state = {.threads{},
+                                        .threads_running{},
                                         .thread_main = static_cast<ThreadID>(-1),
                                         .thread_sel_reg_dump = static_cast<ThreadID>(-1),
                                         .thread_sel_flow = static_cast<ThreadID>(-1),
                                         .user_regs_dirty = true};
 
-constexpr auto OK = "OK";
-constexpr auto E01 = "E01";
+constexpr const char* OK = "OK";
+constexpr const char* E01 = "E01";
+constexpr const char* touch_grass = "UwU";
 
-std::string Estr(std::string msg) {
-    return std::format("E.{}", msg);
+// -1 fail, 0 N/A, 1 Action done
+// doesn't return anything to client
+s8 HandleContinuous(GdbCommand cmd) {
+    char maincmd = cmd.cmd[0];
+    if (maincmd == 'c') {
+        LOG_WARNING(Debug, "stub, add SIG argument, check if target(s) is running already, maybe "
+                           "add continue address??");
+        ThreadID target = g_system_state.thread_sel_flow;
+        u8 sig = 0; // take from the argument
+
+        if (target != -1) {
+            LOG_ERROR(Debug, "GDB Continuing thread ", target);
+            if (!child_continue(target, sig)) {
+                LOG_ERROR(Debug, "GDB Can't continue thread {}", target);
+            }
+            return -1;
+        }
+
+        LOG_ERROR(Debug, "Continuing all threads");
+
+        bool wasError = false;
+        for (auto [tid, _] : g_system_state.threads) {
+            if (ptrace(PTRACE_CONT, tid, nullptr, nullptr) == -1) {
+                wasError = true;
+                LOG_ERROR(Debug, "GDB Cannot continue thread {}", tid);
+            }
+        }
+
+        return wasError ? -1 : 1;
+    }
+
+    return 0;
 }
 
 std::string HandlePacket(GdbCommand cmd) {
     char maincmd = cmd.cmd[0];
 
+    if (maincmd == 'D') {
+        LOG_WARNING(Debug, "Detach -- stub");
+        return touch_grass;
+    }
+
+    if (maincmd == '\03') {
+        LOG_WARNING(Debug, "stub");
+
+        int status;
+        pid_t waitpid_responder;
+
+        ThreadID target = g_system_state.thread_sel_flow;
+        if (target != -1) {
+            LOG_ERROR(Debug, "Interrupting thread {}", target);
+            if (ptrace(PTRACE_INTERRUPT, target, nullptr, nullptr) == -1) {
+                LOG_ERROR(Debug, "GDB Can't stop thread {}", target);
+                return E01;
+            }
+            waitpid_responder = waitpid(target, &status, 0);
+            if (waitpid_responder == -1) {
+                LOG_ERROR(Debug, "GDB Child can't get interrupted {}", target);
+                return E01;
+            }
+            return "T02";
+        }
+
+        // else is omitted, if not selected we want all threads
+        LOG_ERROR(Debug, "Interrupting all threads");
+        bool wasError = false;
+        for (auto [tid, _] : g_system_state.threads) {
+            if (ptrace(PTRACE_INTERRUPT, tid, nullptr, nullptr) == -1) {
+                wasError = true;
+                LOG_ERROR(Debug, "GDB Cannot continue thread {}", tid);
+            }
+        }
+
+        // Detection by elimination lol
+        std::vector<ThreadID> stopped_threads_NOT(std::views::keys(g_system_state.threads).begin(),
+                                                  std::views::keys(g_system_state.threads).end());
+        bool all_stopped = false;
+        while (!all_stopped) {
+            waitpid_responder = waitpid(-1, &status, __WALL);
+            if (waitpid_responder == -1) {
+                LOG_ERROR(Debug, "Co do huja nawet nie wiem co to oznacza, nie da sie zaczekac na "
+                                 "zjebany proces ktory mial sie przerwac");
+                continue;
+            }
+
+            if (!child_thread_stopped(status))
+                continue;
+
+            if (child_thread_stopped(status)) {
+                if (child_thread_stop_reason(status) == (SIGTRAP | 0x80)) {
+                    LOG_ERROR(Debug, "[*] Thread {} got SYSCALL SIGTRAP", waitpid_responder);
+                } else if (child_thread_stop_reason(status) == SIGTRAP) {
+                    LOG_ERROR(Debug, "[*] Thread {} got SIGTRAP", waitpid_responder);
+                } else {
+                    LOG_ERROR(Debug, "[*] Thread {} stopped with code",
+                              child_thread_stop_reason(status));
+                    continue;
+                }
+            }
+
+            if (std::erase(stopped_threads_NOT, waitpid_responder) == 0) {
+                LOG_ERROR(Debug, "An untraced child thread did something funky wunky");
+            }
+            all_stopped = stopped_threads_NOT.empty();
+        }
+
+        // normal stop reply packet, same as stops for '?'
+        LOG_ERROR(Debug, "All threads stopped");
+        return "T02";
+        // however...
+        // T AA format allows for passing information like
+        // breakpoints (sigtrap/user), forks and other events
+        // so... basically a wrapper for ptrace.
+    }
+
     if (maincmd == '?') {
-        return "S05";
+        LOG_WARNING(Debug, "stub, update stop reason signal,change to T ???and list threads??");
+        return "running"; // g_system_state.running ? "OK" : "T05";
     }
 
     if (maincmd == 'm') {
@@ -67,19 +178,16 @@ std::string HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'g') {
-        if (cmd.cmd.length() > 1)
-            LOG_WARNING(Debug, "GDB g packet has unexpected argument or subcommand");
-
         ThreadID target = g_system_state.thread_sel_reg_dump;
 
         struct user_regs_struct* regs = &g_system_state.user_regs;
         struct user_fpregs_struct* fpregs = &g_system_state.user_fpregs;
-        if (!ThreadReadRegisters(target, regs, fpregs)) {
+        if (!child_thread_dump_regs(target, regs, fpregs)) {
             LOG_ERROR(Debug, "GDB Can't read registers of thread {}", target);
             return E01;
         }
         g_system_state.user_regs_dirty = false;
-        return dumpRegistersFromThread(regs, fpregs);
+        return PrintRegisters(regs, fpregs);
     }
 
     if (maincmd == 'p') {
@@ -104,26 +212,28 @@ std::string HandlePacket(GdbCommand cmd) {
 
     if (maincmd == 'H') {
         ThreadID ttid = std::stoul(cmd.arg, nullptr, 16);
-        ThreadID* targetThread = nullptr;
+        ThreadID* threadActionTarget = nullptr;
 
         char subcmd = cmd.cmd[1];
 
         if (subcmd == 'g') {
-            targetThread = &g_system_state.thread_sel_reg_dump;
+            threadActionTarget = &g_system_state.thread_sel_reg_dump;
         }
         if (subcmd == 'c') {
-            targetThread = &g_system_state.thread_sel_flow;
+            threadActionTarget = &g_system_state.thread_sel_flow;
         }
 
-        if (targetThread != nullptr) {
+        if (threadActionTarget != nullptr) {
             if (ttid == 0) {
-                *targetThread = g_system_state.thread_main;
+                *threadActionTarget = g_system_state.thread_main;
+                LOG_WARNING(Debug, "GDB H[{}] packet -> selected main thread ({})", subcmd,
+                            *threadActionTarget);
             } else if (ttid == -1) {
                 LOG_WARNING(Debug, "GDB H[{}] packet -> all threads", subcmd);
-                *targetThread = -1;
+                *threadActionTarget = -1;
             } else if (g_system_state.threads.find(ttid) != g_system_state.threads.end()) {
                 LOG_WARNING(Debug, "GDB H[{}] packet -> selected thread {}", subcmd, ttid);
-                *targetThread = ttid;
+                *threadActionTarget = ttid;
             } else {
                 LOG_ERROR(Debug, "GDB H[{}] requested nonexistent PID:{}", subcmd, ttid);
                 return E01;
@@ -141,26 +251,34 @@ std::string HandlePacket(GdbCommand cmd) {
             return "";
         }
         if (cmd.cmd == "vCont?") {
-            return "vCont;s;c;t";
+            // return "vCont;s;c;t";
+            return "vCont;c;t"; // step currently not implemented
         }
         return "";
     }
 
     if (maincmd == 'q') {
         const std::vector<std::string> argTokens = split(cmd.arg, ':');
+
+        if (cmd.cmd[1] == 'T') {
+            // I think qT packets can be safely ignored
+            // Could pose problems if user wants to see the variables though :')
+            // Let's make it work first
+            // Yes, empty is valid
+            return "";
+        }
         if (cmd.cmd == "qC") {
+            // target disputable, works for now
             return std::format("QC{:x}", g_system_state.thread_sel_reg_dump);
         }
         if (cmd.cmd == "qAttached") {
             return "1";
         }
         if (cmd.cmd == "qSupported") {
-            // std::string resp =
-            // "PacketSize=1024;multiprocess-;qXfer:features:read+;qXfer:threads:"
-            //                    "read+;binary-upload+";
+            // QThreadEvents+ces
             std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+;binary-upload+";
             if (resp.find("swbreak+"))
-                resp += "swbreak+";
+                resp += ";swbreak+";
             return resp;
         }
 
@@ -173,16 +291,11 @@ std::string HandlePacket(GdbCommand cmd) {
                 /*
                 if (argTokens[0] == "features") {
                     if (argTokens[2] == "target.xml") {
-                        return R"(l<?xml version="1.0"?>
-<!DOCTYPE target SYSTEM "gdb-target.dtd">
-<target version="1.0">
-  <architecture>i386:x86-64</architecture>
-</target>)";
+                        ;
                     }
                 }*/
                 if (argTokens[0] == "threads") {
                     return ThreadList();
-                    LOG_WARNING(Debug, "Stub");
                 }
             }
         }
@@ -270,20 +383,6 @@ std::string MakeResponse(const std::string response) {
     return "+$" + response + "#" + fmt::format("{:02X}", CalculateChecksum(response));
 }
 
-std::string ThreadGetName(ThreadID tid) {
-    // pthread can't pull out name if it belongs to other process
-    // just... really?
-    // pthread_getname_np(tid, buf, 16);
-
-    std::ifstream commFile(std::format("/proc/{}/comm", tid));
-    if (!commFile.is_open()) {
-        return {};
-    }
-    std::string name;
-    std::getline(commFile, name);
-    return name;
-}
-
 void ThreadRegister(ThreadID tid) {
     // Give it a temporary name
     g_system_state.threads[tid] = std::format("Thr{}", tid);
@@ -299,7 +398,7 @@ void ThreadUnregister(ThreadID tid) {
 void ThreadRefresh(void) {
     bool thrfnd = false;
     for (auto& [tid, name] : g_system_state.threads) {
-        std::string thrName = ThreadGetName(tid);
+        std::string thrName = child_thread_name(tid);
         name = thrName;
         if (tid == g_system_state.thread_sel_reg_dump)
             thrfnd = true;
@@ -335,28 +434,7 @@ bool ReadMemory(const u64 address, const u64 length, std::string* out) {
     return true;
 }
 
-bool ThreadReadRegisters(ThreadID tid, struct user_regs_struct* regs,
-                         struct user_fpregs_struct* fpregs) {
-    if (ptrace(PTRACE_GETREGS, tid, nullptr, regs) == -1) {
-        return false;
-    }
-    if (ptrace(PTRACE_GETFPREGS, tid, nullptr, fpregs) == -1) {
-        return false;
-    }
-    return true;
-}
-
 // we need this to map user_regs_struct to GDB
-/*
-#define X86_64_REG_COUNT 24
-const u16 user_reg_idx[X86_64_REG_COUNT] = {10, 5, 11, 12, 13, 14, 4,  19, 9,  8,  7,  6,
-                                            3,  2, 1,  0,  16,
-                                             18, 17, 20, 23, 24, 25, 26};
-const u16 user_reg_size[X86_64_REG_COUNT] = {8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
-                                             8, 8, 8, 8, 8,
-                                              4, 4, 4, 4, 4, 4, 4};
-                                              */
-// not all because eflags are read incorrectly
 #define X86_64_REG_COUNT 24
 const u16 user_reg_size[X86_64_REG_COUNT] = {8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
                                              8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 4};
@@ -387,9 +465,7 @@ const u16 user_reg_offsets[X86_64_REG_COUNT] = {offsetof(struct user_regs_struct
 
 };
 
-// struct user_regs_struct*
-// struct user_fpregs_struct*
-std::string dumpRegistersFromThread(const struct user_regs_struct* regs,
+std::string PrintRegisters(const struct user_regs_struct* regs,
                                     const struct user_fpregs_struct* fpregs) {
 
     std::string out = "";
@@ -403,6 +479,7 @@ std::string dumpRegistersFromThread(const struct user_regs_struct* regs,
         out = out + byteSwap(buf, reg_size * 2);
     }
 
+    // Uncomment for some insider knowledge
     /*
     LOG_INFO(Debug, "RAX\t{:016x}", regs->rax);
     LOG_INFO(Debug, "RBX\t{:016x}", regs->rbx);
@@ -438,138 +515,3 @@ std::string dumpRegistersFromThread(const struct user_regs_struct* regs,
 } // namespace GdbStub
 
 } // namespace Core::Devtools
-
-/*
-bool GdbStub2::HandleIncomingData(const int client) {
-
-    //  if (data.empty()) {
-    //       return false;
-    //  }
-    std::string data;
-    if (data == "+") {
-        // Connection acknowledgement
-        send(client, "+", 1, 0);
-        return true;
-    }
-    if (data == "-") {
-        send(client, prevMsg.c_str(), prevMsg.size(), 0);
-        return true;
-    }
-
-    if (data.front() == char(ControlCode::Ack)) {
-        data = data.substr(1);
-    }
-
-    GdbCommand command = GdbCommand(); // ParsePacket(data);
-    std::string response = handler(command);
-    std::string msg = MakeResponse(response);
-    prevMsg = msg;
-
-    LOG_INFO(Debug, "Received data:\n\tRAW: {}\n\tCMD: {}\n\tARG: {}\n\tRESP: {}", command.raw,
-             command.cmd, command.arg, response);
-
-    if (msg.empty()) {
-        return false;
-    }
-
-    if (send(client, msg.c_str(), msg.size(), 0) == -1) {
-        return false;
-    }
-
-    return true;
-}
-
-std::string GdbStub2::handler(const GdbCommand& command) {
-
-    if (command.cmd == "qAttached")
-        return "1";
-
-    char category = command.cmd[0];
-
-    switch (category) {
-    default:
-        break;
-    case '\03': // pause target
-        break;
-    case '!':
-        // No point of supporting that (change my mind)
-        return "";
-    case '?':
-               for (u16 idx = 0; idx < shd->size; idx++) {
-                    struct ThreadInfo* thd = &shd->threads[idx];
-                    ptrace(PTRACE_SEIZE, thd->tid, nullptr, nullptr);
-                    ptrace(PTRACE_INTERRUPT, thd->tid, nullptr, nullptr);
-                    waitpid(thd->tid, nullptr, 0);
-                }
-                process_stop(shd, pid_target);
-
-        return "S05";
-
-    case 'c':
-        // kill(target_pid, SIGCONT);
-        // waitpid(target_pid, nullptr, 0);
-        return "S09";
-        for (u16 idx = 0; idx < shd->size; idx++) {
-            struct ThreadInfo* thd = &shd->threads[idx];
-            ptrace(PTRACE_CONT, thd->tid, nullptr, nullptr);
-            waitpid(thd->tid, nullptr, 0);
-        }
-
-        // if (DebugState.IsGuestThreadsPaused())
-        //     DebugState.ResumeGuestThreads();
-        // return OK;
-
-    case 'H': // handle threads, -1 all, 0 any
-        // return handle_H_packet(command);
-        break;
-    case 'g':
-        return "00000000000000000000000000000000";
-        {
-            struct ThreadInfo* target = getThreadByName(shd, GAME_MAIN_THREAD_NAME);
-            struct user_regs_struct regs;
-            struct user_fpregs_struct fpregs;
-            ptrace(PTRACE_GETREGS, target->tid, nullptr, &regs);
-            ptrace(PTRACE_GETFPREGS, target->tid, nullptr, &fpregs);
-
-            LOG_ERROR(Debug, "Dumping thread registers: {} ({:x})", target->name, target->tid);
-            return dumpRegistersFromThread(&regs, &fpregs);
-        }
-        break; // read general registers
-    case 'G':
-        break; // write general registers
-
-    case 'M': // M addr,length:XX write
-        break;
-
-    case 'P': // P n=x reg write
-        break;
-    case 'x': // same as m but binary
-        break;
-    case 'X': // same as M but binary
-        break;
-
-        // advanced
-    case 'v': // Special, multiletter, until first ; OR until first ? OR until EOS
-              //    return handle_v_packet(command);
-        break;
-
-    case 'q':
-        //      return handle_q_packet(command);
-        break;
-    case 'Q':
-        //        return handle_Q_packet(command);
-        break;
-
-    case 'r':
-    case 'R':
-        return "E.Target reset not allowed";
-
-    case 'z': // insert breakpoint (0-SW, 1-HW, 2-write, 3-read, 4-access)
-        break;
-    case 'Z': // remove breakpoint
-        break;
-    }
-    return NIMPL(command.cmd);
-}
-
-*/

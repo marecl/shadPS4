@@ -22,22 +22,24 @@ namespace GdbStub {
 
 #define MAX_REGISTERED_THREADS 2137
 
+extern const char* const OK;
+extern const char* const E01;
+extern const char* const touch_grass;
+
 struct system_state_t {
-    bool running;
-    // make this const at program startup
+    std::unordered_map<pid_t, std::string> threads; // TID + name
+    std::unordered_map<pid_t, u8> threads_running;  // TID + latest signal sent/received
+    // make this const at program startup??
     ThreadID thread_main;
-    // this not
-    // in case if gdb can select multiple threads, be prepared to turn this into vector
-    ThreadID thread_sel_reg_dump;
-    ThreadID thread_sel_flow;
-    std::unordered_map<pid_t, std::string> threads;
+    // in case if gdb can select multiple threads, be prepared to turn these into vectors
+    ThreadID thread_sel_reg_dump;                   // selected for g-action
+    ThreadID thread_sel_flow;                       // selected for s/c/t action
     // latest thread dump
-    bool user_regs_dirty; // thread changed, dumped structs are outdated
+    bool user_regs_dirty; // thread changed, true if regs weren't updated
     struct user_regs_struct user_regs;
     struct user_fpregs_struct user_fpregs;
 };
 extern struct system_state_t g_system_state;
-
 enum class ControlCode : char {
     Ack = '+',
     Nack = '-',
@@ -52,80 +54,26 @@ struct GdbCommand {
     std::string arg{};
 };
 
+s8 HandleContinuous(GdbCommand cmd);
 std::string HandlePacket(GdbCommand cmd);
 void ThreadRegister(ThreadID id);
 void ThreadUnregister(ThreadID id);
 void ThreadRefresh(void);
 std::string ThreadList(void);
-ThreadID ThreadMainOrElse(void);
+
+// dump for gdb ONLY IF WERE READ FIRST!!!
+
+// struct user_regs_struct*
+// struct user_fpregs_struct*
+std::string PrintRegisters(const struct user_regs_struct* regs,
+                                    const struct user_fpregs_struct* fpregs);
 
 // pretty generic if you asked me
 s8 Preprocess(std::string& data);
 GdbCommand ParsePacket(const std::string data);
 std::string MakeResponse(const std::string response);
-std::string ThreadGetName(ThreadID tid);
 bool ReadMemory(const u64 address, const u64 length, std::string* out);
-// read with ptrace, still generic
-bool ThreadReadRegisters(ThreadID tid, struct user_regs_struct* regs,
-                         struct user_fpregs_struct* fpregs);
-// dump for gdb ONLY IF WERE READ FIRST!!!
-
-// struct user_regs_struct*
-// struct user_fpregs_struct*
-std::string dumpRegistersFromThread(const struct user_regs_struct* regs,
-                                    const struct user_fpregs_struct* fpregs);
 
 } // namespace GdbStub
-/*
-class GdbStub2 {
-public:
-    explicit GdbStub2(pid_t target);
-    ~GdbStub2();
-    bool Run();
-
-    std::string ThreadList(void);
-
-private:
-    std::vector<ThreadID> children;
-
-    static volatile sig_atomic_t stop_flag;
-
-    // Taken from xenia
-    enum class ControlCode : char {
-        Ack = '+',
-        Nack = '-',
-        PacketStart = '$',
-        PacketEnd = '#',
-        Interrupt = '\03',
-    };
-
-    ThreadInfo* selectedThread;
-
-    const pid_t target_pid;
-    const pid_t self_pid;
-
-    // Taken from xenia
-    typedef struct _GdbCommand {
-        std::string raw{};
-        std::string cmd{};
-        std::string arg{};
-    } GdbCommand;
-
-    static bool IsValidAddress(u64 address, u64 length);
-    static bool ReadMemory(u64 address, u64 length, std::string* out);
-    static GdbCommand ParsePacket(const std::string& data);
-    bool HandleIncomingData(const int client);
-    static GdbStub::GdbCommand HandleCommand(const GdbCommand& command);
-    ThreadInfo* getThreadHandleFromString(const std::string& data);
-    std::string dumpRegistersFromThread(struct user_regs_struct* regs,
-                                        struct user_fpregs_struct* fpregs);
-    std::string handler(const GdbCommand& command);
-    std::string handle_v_packet(const GdbCommand& command);
-    std::string handle_H_packet(const GdbCommand& command);
-    std::string handle_q_packet(const GdbCommand& command);
-    std::string handle_Q_packet(const GdbCommand& command) {
-        return "E.Stub";
-    }
-};*/
 
 } // namespace Core::Devtools

@@ -648,9 +648,10 @@ set(DEV_TOOLS src/core/devtools/layer.cpp
               src/gdbstub/gdb_server.cpp
               
               src/gdbstub/threadinfo.h
-              src/gdbstub/threadinfo.cpp
-              src/gdbstub/processtools.h
-              src/gdbstub/processtools.cpp
+              src/gdbstub/childtools.h
+              src/gdbstub/childtools.cpp
+              src/gdbstub/stubtools.h
+              src/gdbstub/stubtools.cpp
 )
 
 set(COMMON src/common/logging/backend.cpp

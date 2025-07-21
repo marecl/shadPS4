@@ -17,23 +17,4 @@ using ThreadID = DWORD;
 using ThreadID = pthread_t;
 #endif
 
-#define GAME_MAIN_THREAD_NAME (const char*)"GAME_MainThread"
-#define MAX_REGISTERED_THREADS 2137
-
-struct ThreadInfo {
-    ThreadID tid;
-    u32 tid_enc;
-    char name[16];
-};
-
-struct SharedVector {
-    u16 size;
-    ThreadInfo threads[MAX_REGISTERED_THREADS];
-};
-
-struct ThreadInfo* getThreadByID(struct SharedVector* threads, ThreadID id);
-struct ThreadInfo* getThreadByName(struct SharedVector* threads, std::string name);
-struct ThreadInfo* getThreadByEncodedID(struct SharedVector* threads, u32 tid_enc);
-ThreadID string2tid(std::string str);
-
 #endif // THREAD_META_H
