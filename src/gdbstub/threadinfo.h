@@ -1,9 +1,5 @@
-#ifndef THREAD_META_H
-#define THREAD_META_H
-
-#include <iostream>
-#include <string>
-#include "src/common/types.h"
+#ifndef THREADINFO_H
+#define THREADINFO_H
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -17,4 +13,4 @@ using ThreadID = DWORD;
 using ThreadID = pthread_t;
 #endif
 
-#endif // THREAD_META_H
+#endif // THREADINFO_H

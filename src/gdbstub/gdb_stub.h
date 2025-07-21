@@ -1,20 +1,15 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#pragma once
+#ifndef GDB_STUB_H
+#define GDB_STUB_H
 
 #include <iostream>
 #include <thread>
 #include <unordered_map>
 #include <vector>
-#include <ucontext.h>
 #include "gdb_data.h"
 #include "threadinfo.h"
-
-#include <sys/prctl.h>
-#include <sys/ptrace.h>
-#include <sys/user.h>
-#include <sys/wait.h>
 
 namespace Core::Devtools {
 
@@ -32,8 +27,8 @@ struct system_state_t {
     // make this const at program startup??
     ThreadID thread_main;
     // in case if gdb can select multiple threads, be prepared to turn these into vectors
-    ThreadID thread_sel_reg_dump;                   // selected for g-action
-    ThreadID thread_sel_flow;                       // selected for s/c/t action
+    ThreadID thread_sel_reg_dump; // selected for g-action
+    ThreadID thread_sel_flow;     // selected for s/c/t action
     // latest thread dump
     bool user_regs_dirty; // thread changed, true if regs weren't updated
     struct user_regs_struct user_regs;
@@ -66,7 +61,7 @@ std::string ThreadList(void);
 // struct user_regs_struct*
 // struct user_fpregs_struct*
 std::string PrintRegisters(const struct user_regs_struct* regs,
-                                    const struct user_fpregs_struct* fpregs);
+                           const struct user_fpregs_struct* fpregs);
 
 // pretty generic if you asked me
 s8 Preprocess(std::string& data);
@@ -77,3 +72,5 @@ bool ReadMemory(const u64 address, const u64 length, std::string* out);
 } // namespace GdbStub
 
 } // namespace Core::Devtools
+
+#endif // GDB_STUB_H

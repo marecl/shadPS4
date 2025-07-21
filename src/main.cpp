@@ -15,11 +15,10 @@
 #include "common/logging/log.h"
 #include "mainReal.h"
 
-#include "gdbstub/threadinfo.h"
-// #include "gdbstub/gdb_data.h"
 #include "gdbstub/childtools.h"
 #include "gdbstub/gdb_server.h"
 #include "gdbstub/gdb_stub.h"
+#include "gdbstub/threadinfo.h"
 
 int main(int argc, char* argv[]) {
     pid_t parentpid = getpid();
@@ -145,22 +144,22 @@ int main(int argc, char* argv[]) {
                         }
                         child_continue(tid, SIGSEGV);
                         // I might regret adding this
-                        //GdbStub::g_system_state.running = true;
+                        // GdbStub::g_system_state.running = true;
                     }
 
                 } else if (child_thread_stop_reason(status) == SIGTRAP) {
                     LOG_INFO(Debug, "[*] Thread {} got SIGTRAP {:X}", tid,
                              child_thread_stop_reason(status));
-                    //GdbStub::g_system_state.running = false;
+                    // GdbStub::g_system_state.running = false;
                 } else if (child_thread_sigtrap_is_syscall(status)) {
                     LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP {:X}", tid,
                              child_thread_stop_reason(status));
-                    //GdbStub::g_system_state.running = false;
-                    // child_continue(tid);
+                    // GdbStub::g_system_state.running = false;
+                    //  child_continue(tid);
                 } else {
                     LOG_INFO(Debug, "[*] Thread {} stopped with signal {:X}", tid,
                              child_thread_stop_reason(status));
-                    //GdbStub::g_system_state.running = false;
+                    // GdbStub::g_system_state.running = false;
                 }
 
             } else if (child_thread_exited(status)) {
@@ -185,7 +184,7 @@ int main(int argc, char* argv[]) {
 
                 child_continue(new_tid);
                 child_continue(tid);
-                //GdbStub::g_system_state.running = true;
+                // GdbStub::g_system_state.running = true;
             }
             if (child_thread_evt_exit(status)) {
                 LOG_INFO(Debug, "[-] Thread {} ends with status {:X}", tid, status);

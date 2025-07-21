@@ -2,6 +2,9 @@
 #ifndef CHILDTOOLS_H
 #define CHILDTOOLS_H
 
+#include <string>
+#include <sys/user.h>
+
 #include "threadinfo.h"
 
 bool child_continue(ThreadID tid, int signal = 0);

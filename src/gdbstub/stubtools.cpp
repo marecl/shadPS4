@@ -44,10 +44,7 @@ std::string byteSwapString(std::string data, u8 width) {
 // width in individual digits
 // 64-bits are aligned to 16, 32 to 8 etc.
 std::string byteSwap(u64 regval, u8 width) {
-    // format string to format string specifying output amount of bytes
-
-    u64 val = __builtin_bswap64(regval);
     std::string fstr = std::format("{{:0{}x}}", width);
-    std::string regValStr = std::vformat(fstr, std::make_format_args((val)));
-    return regValStr; // byteSwapString(regValStr, width);
+    std::string regValStr = std::vformat(fstr, std::make_format_args((regval)));
+    return byteSwapString(regValStr, width);
 }

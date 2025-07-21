@@ -1,7 +1,6 @@
 #include "childtools.h"
 
 #include <fstream>
-#include <sys/prctl.h>
 #include <sys/ptrace.h>
 #include <sys/user.h>
 #include <sys/wait.h>

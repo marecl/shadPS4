@@ -7,23 +7,15 @@
 #include <regex>
 #include <string>
 #include <fmt/xchar.h>
-#include <netinet/in.h>
-#include <pthread.h>
 #include <sys/ptrace.h>
-#include <sys/socket.h>
 #include <sys/user.h>
 #include <sys/wait.h>
 
 #include "childtools.h"
-#include "common/assert.h"
 #include "common/debug.h"
 #include "common/logging/backend.h"
 #include "common/logging/log.h"
-#include "core/debug_state.h"
 #include "core/libraries/kernel/kernel.h"
-#include "core/libraries/kernel/threads/pthread.h"
-#include "core/memory.h"
-#include "core/thread.h"
 #include "gdb_stub.h"
 #include "stubtools.h"
 #include "threadinfo.h"
@@ -162,7 +154,8 @@ std::string HandlePacket(GdbCommand cmd) {
 
     if (maincmd == '?') {
         LOG_WARNING(Debug, "stub, update stop reason signal,change to T ???and list threads??");
-        return "running"; // g_system_state.running ? "OK" : "T05";
+        // it WILL mess up GDB if it's running before it initializes everything
+        return "T05";//"running"; // g_system_state.running ? "OK" : "T05";
     }
 
     if (maincmd == 'm') {
@@ -466,7 +459,7 @@ const u16 user_reg_offsets[X86_64_REG_COUNT] = {offsetof(struct user_regs_struct
 };
 
 std::string PrintRegisters(const struct user_regs_struct* regs,
-                                    const struct user_fpregs_struct* fpregs) {
+                           const struct user_fpregs_struct* fpregs) {
 
     std::string out = "";
 
