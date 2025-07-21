@@ -6,15 +6,17 @@
 #include <iostream>
 #include <string>
 #include <vector>
+
 #include <common/types.h>
 #include <sys/prctl.h>
 #include <sys/ptrace.h>
 #include <sys/user.h>
 #include <sys/wait.h>
-#include "common/logging/backend.h"
-#include "common/logging/log.h"
+
 #include "mainReal.h"
 
+#include "common/logging/backend.h"
+#include "common/logging/log.h"
 #include "gdbstub/childtools.h"
 #include "gdbstub/gdb_server.h"
 #include "gdbstub/gdb_stub.h"
@@ -46,7 +48,7 @@ int main(int argc, char* argv[]) {
 
         // wait for GDB
         // we're holding child thread stopped in case if the user
-        // needs to debug the app itself
+        // wants to track the app from the beginning
         sleep(1);
         if (!srv.ClientConnected()) {
             // if GDB is not connected, continue as normal
@@ -65,7 +67,6 @@ int main(int argc, char* argv[]) {
         // keep there for '-' packet
         std::string response{};
         std::string msg{};
-        Core::Devtools::GdbStub::GdbCommand cmd;
 
         bool do_continue_what_you_do = true;
         while (do_continue_what_you_do) {
@@ -82,7 +83,7 @@ int main(int argc, char* argv[]) {
                     do_continue_what_you_do = false;
                     break;
                 case GdbStub::LoopAction::BACK_TO_SENDER:
-                    response = msg;
+                    srv.SendMessage(msg);
                     break;
                 case GdbStub::LoopAction::REPEAT:
                     // Response is unmodified
@@ -96,7 +97,6 @@ int main(int argc, char* argv[]) {
                     break;
                 }
             }
-            // end of generic
 
             int status = 0;
             pid_t tid = waitpid(-1, &status, __WALL | WNOHANG);
@@ -173,8 +173,8 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
+
         srv.Stop();
-        std::cout << "Parent out" << std::endl;
     } else {
         std::cout << "Fork error" << std::endl;
     }

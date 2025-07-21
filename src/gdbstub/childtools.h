@@ -5,6 +5,7 @@
 #define CHILDTOOLS_H
 
 #include <string>
+
 #include <sys/user.h>
 
 #include "threadinfo.h"
@@ -24,6 +25,5 @@ int child_thread_kill_reason(int status);
 bool child_thread_evt_clone(int status);
 bool child_thread_evt_exit(int status);
 bool child_thread_sigtrap_is_syscall(int status);
-
 
 #endif // CHILDTOOLS_H

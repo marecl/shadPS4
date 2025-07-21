@@ -6,6 +6,7 @@
 #include <iostream>
 #include <regex>
 #include <string>
+
 #include <fmt/xchar.h>
 #include <sys/ptrace.h>
 #include <sys/user.h>
@@ -440,6 +441,7 @@ void ThreadRegister(ThreadID tid) {
     // Give it a temporary name
     g_system_state.threads[tid] = std::format("Thr{}", tid);
 }
+
 void ThreadUnregister(ThreadID tid) {
     if (g_system_state.thread_main == tid) {
         LOG_WARNING(Debug, "Main thread unregistered: {}", tid);

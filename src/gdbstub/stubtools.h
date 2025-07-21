@@ -2,6 +2,7 @@
 #define STUBTOOLS_H
 
 #include <string>
+
 #include "common/types.h"
 
 // Checksum for GDB

@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "childtools.h"
-
 #include <fstream>
+
 #include <sys/ptrace.h>
 #include <sys/user.h>
 #include <sys/wait.h>
+
+#include "childtools.h"
 #include "threadinfo.h"
 
 bool child_continue(ThreadID target, int signal) {

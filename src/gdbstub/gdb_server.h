@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 #include <queue>
+
 #include "common/types.h"
 
 class StubServer {

@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <iostream>
+
 #include <netinet/in.h>
 #include <sys/socket.h>
+
 #include "gdb_server.h"
 
 void StubServer::Start(void) {
