@@ -37,6 +37,17 @@ bool thread_stopped(ThreadID tid) {
     return ptrace(PTRACE_GETSIGINFO, tid, NULL, &si) == 0;
 }
 
-bool ptrace_dump_regs(struct user_regs_struct* regs, struct user_fpregs_struct* fpregs) {return true;}
+bool ptrace_dump_regs(ThreadID tid, struct user_regs_struct* regs,
+                      struct user_fpregs_struct* fpregs) {
+
+    if (ptrace(PTRACE_GETREGS, tid, nullptr, regs) == -1) {
+        return false;
+    }
+    if (ptrace(PTRACE_GETFPREGS, tid, nullptr, fpregs) == -1) {
+        return false;
+    }
+
+    return true;
+}
 
 #endif // PROCESSTOOLS_H

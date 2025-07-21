@@ -13,12 +13,14 @@
 #include "common/path_util.h"
 #include "core/file_sys/fs.h"
 #include "emulator.h"
+#include <signal.h>
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
 int mainReal(int argc, char* argv[]) {
+    raise(SIGSTOP);
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif
@@ -209,6 +211,5 @@ int mainReal(int argc, char* argv[]) {
     Core::Emulator emulator;
     emulator.Run(eboot_path, game_args);
 
-                std::cout << "XDXDXD" << std::endl;
     return 0;
 }

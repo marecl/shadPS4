@@ -28,8 +28,13 @@ struct system_state_t {
     ThreadID thread_main;
     // this not
     // in case if gdb can select multiple threads, be prepared to turn this into vector
-    ThreadID thread_selected;
+    ThreadID thread_sel_reg_dump;
+    ThreadID thread_sel_flow;
     std::unordered_map<pid_t, std::string> threads;
+    // latest thread dump
+    bool user_regs_dirty; // thread changed, dumped structs are outdated
+    struct user_regs_struct user_regs;
+    struct user_fpregs_struct user_fpregs;
 };
 extern struct system_state_t g_system_state;
 
@@ -58,8 +63,17 @@ ThreadID ThreadMainOrElse(void);
 s8 Preprocess(std::string& data);
 GdbCommand ParsePacket(const std::string data);
 std::string MakeResponse(const std::string response);
-
 std::string ThreadGetName(ThreadID tid);
+bool ReadMemory(const u64 address, const u64 length, std::string* out);
+// read with ptrace, still generic
+bool ThreadReadRegisters(ThreadID tid, struct user_regs_struct* regs,
+                         struct user_fpregs_struct* fpregs);
+// dump for gdb ONLY IF WERE READ FIRST!!!
+
+// struct user_regs_struct*
+// struct user_fpregs_struct*
+std::string dumpRegistersFromThread(const struct user_regs_struct* regs,
+                                    const struct user_fpregs_struct* fpregs);
 
 } // namespace GdbStub
 /*

@@ -26,7 +26,6 @@ int main(int argc, char* argv[]) {
     pid_t target = fork();
 
     if (target == 0) {
-        raise(SIGSTOP);
         auto ret = mainReal(argc, argv);
         exit(ret);
 
@@ -60,12 +59,15 @@ int main(int argc, char* argv[]) {
 
         // Rebuild just in case. On init there's only one thread active anyway
         Core::Devtools::GdbStub::ThreadRefresh();
-        Core::Devtools::GdbStub::g_system_state.thread_selected = target;
+        Core::Devtools::GdbStub::g_system_state.thread_sel_reg_dump = target;
+        Core::Devtools::GdbStub::g_system_state.thread_sel_flow = target;
         Core::Devtools::GdbStub::g_system_state.thread_main = target;
 
+        // keep there for '-' packet
         std::string response;
 
         while (1) {
+            // looks pretty generic too
             using namespace Core::Devtools;
             std::string msg;
             if (srv.GetMessage(msg)) {
@@ -78,7 +80,7 @@ int main(int argc, char* argv[]) {
                     LOG_ERROR(Debug, "Error while receiving packet");
                     break;
                 case 0:
-                    LOG_INFO(Debug, "Back to sender: {}", msg);
+                    // LOG_INFO(Debug, "Back to sender: {}", msg);
                     response = msg;
                     break;
                 case 1: {
@@ -95,6 +97,7 @@ int main(int argc, char* argv[]) {
                 if (!isError)
                     srv.SendMessage(response);
             }
+            // end of generic
 
             int status = 0;
             pid_t tid = waitpid(-1, &status, __WALL | WNOHANG);
@@ -125,7 +128,10 @@ int main(int argc, char* argv[]) {
                 } else if (child_thread_stop_reason(status) == SIGTRAP) {
                     LOG_INFO(Debug, "[*] Thread {} got SIGTRAP {:X}", tid,
                              child_thread_stop_reason(status));
-
+                } else if (child_thread_sigtrap_is_syscall(status)) {
+                    LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP {:X}", tid,
+                             child_thread_stop_reason(status));
+                    // child_continue(tid);
                 } else {
                     LOG_INFO(Debug, "[*] Thread {} stopped with signal {:X}", tid,
                              child_thread_stop_reason(status));
@@ -160,10 +166,6 @@ int main(int argc, char* argv[]) {
                 if (tid == target) {
                     break;
                 }
-            }
-            if (child_thread_sigtrap_is_syscall(status)) {
-                LOG_INFO(Debug, "[*] Syscall trap, continuing");
-                child_continue(tid);
             }
         }
         srv.Stop();
