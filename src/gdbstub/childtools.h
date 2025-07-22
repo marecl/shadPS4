@@ -5,17 +5,79 @@
 #define CHILDTOOLS_H
 
 #include <string>
+#include <unordered_map>
 
 #include <sys/user.h>
 
+#include "common/types.h"
 #include "threadinfo.h"
 
-bool child_continue(ThreadID target, int signal = 0);
-bool child_hijack(ThreadID target);
-bool child_thread_dump_regs(ThreadID target, struct user_regs_struct* regs,
-                            struct user_fpregs_struct* fpregs);
-std::string child_thread_name(ThreadID target);
+enum SignalStop : int { STOP = SIGSTOP, INTERRUPT = SIGINT, TRAP = SIGTRAP };
 
+typedef struct _thread_state_t {
+    ThreadID tid = -1;
+    std::string name{};
+    bool running{false};
+    u8 signal{0};
+} thread_state_t;
+
+class Predator {
+public:
+    Predator(ThreadID main_thread)
+        : _main_thread(main_thread), thread_sel_flow(main_thread),
+          thread_sel_reg_dump(main_thread) {};
+    ~Predator() {};
+
+    // Flow control
+
+    bool ChildThreadHijack(ThreadID target);
+    bool ChildThreadContinue(ThreadID target, int signal = SIGCONT);
+    ThreadID Wait(ThreadID target, int* status, int options); ///< possibly split into __WALL, WSTOPPED
+    u8 IsRunning(ThreadID target);
+    bool ChildThreadInterrupt(ThreadID target);
+    bool ChildThreadRemove(ThreadID target);
+
+    // Metadata
+
+    /**
+     * Dump registers from (hopefully) stopped thread.
+     */
+    bool DumpRegs(ThreadID target);
+    /**
+     * Update thread names, check if threads scheduled for
+     * flow control / regdump are still active.
+     */
+    void ThreadRefresh(void);
+
+    // Misc
+
+    /**
+     * Mark latest register dump as dirty, i.e. they weren't
+     * dumped after changing target thread or continuing execution.
+     */
+    void RegDumpInvalidate();
+    thread_state_t* FindThread(ThreadID target);
+
+    // Misc, static pro publico bono
+
+    /**
+     * Extract thread name directly
+     */
+    static std::string ThreadName(ThreadID target);
+
+    // temporarily
+    // private:
+    std::unordered_map<pid_t, thread_state_t> threads{}; ///< TID + name
+
+    const ThreadID _main_thread = -1;        ///< make this const at program startup??
+    ThreadID thread_sel_reg_dump = -1;       ///< selected for g-action
+    ThreadID thread_sel_flow = -1;           ///< selected for s/c/t action
+    bool user_regs_dirty{true};              ///< thread changed, true if regs weren't updated
+    struct user_regs_struct user_regs{};     ///< latest thread regs dump
+    struct user_fpregs_struct user_fpregs{}; ///< latest thread floating point regs dump
+};
+
+// static
 bool child_thread_stopped(int status);
 int child_thread_stop_reason(int status);
 bool child_thread_exited(int status);

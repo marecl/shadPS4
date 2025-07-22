@@ -27,16 +27,11 @@ namespace Core::Devtools {
 
 namespace GdbStub {
 
-struct system_state_t g_system_state = {.threads{},
-                                        .threads_running{},
-                                        .thread_main = static_cast<ThreadID>(-1),
-                                        .thread_sel_reg_dump = static_cast<ThreadID>(-1),
-                                        .thread_sel_flow = static_cast<ThreadID>(-1),
-                                        .user_regs_dirty = true};
-
 constexpr const char* OK = "OK";
 constexpr const char* E01 = "E01";
 constexpr const char* touch_grass = "UwU";
+
+Predator* predator = nullptr;
 
 // -1 error, 0 don't send, 1 send
 LoopAction Loop(std::string message, std::string& response) {
@@ -101,12 +96,14 @@ s8 HandleContinuous(GdbCommand cmd) {
         // TODO: throw out somewhere
         LOG_WARNING(Debug, "stub. add SIG argument. don't continue if already running (or it will "
                            "throw an error). ??maybe continuation address??");
-        ThreadID target = g_system_state.thread_sel_flow;
+        ThreadID target = predator->thread_sel_flow;
+        predator->RegDumpInvalidate();
+
         u8 sig = 0; // take from the argument
 
         if (target != -1) {
             LOG_ERROR(Debug, "GDB Continuing thread ", target);
-            if (!child_continue(target, sig)) {
+            if (!predator->ChildThreadContinue(target, sig)) {
                 LOG_ERROR(Debug, "GDB Can't continue thread {}", target);
                 return -1;
             }
@@ -116,8 +113,8 @@ s8 HandleContinuous(GdbCommand cmd) {
         LOG_ERROR(Debug, "Continuing all threads");
 
         bool wasError = false;
-        for (auto [tid, _] : g_system_state.threads) {
-            if (ptrace(PTRACE_CONT, tid, nullptr, nullptr) == -1) {
+        for (auto [tid, _] : predator->threads) {
+            if (!predator->ChildThreadContinue(tid, sig)) {
                 wasError = true;
                 LOG_ERROR(Debug, "GDB Cannot continue thread {}", tid);
             }
@@ -144,14 +141,14 @@ std::string HandlePacket(GdbCommand cmd) {
         int status;
         pid_t waitpid_responder;
 
-        ThreadID target = g_system_state.thread_sel_flow;
+        ThreadID target = predator->thread_sel_flow;
         if (target != -1) {
             LOG_INFO(Debug, "Interrupting thread {}", target);
             if (ptrace(PTRACE_INTERRUPT, target, nullptr, nullptr) == -1) {
                 LOG_ERROR(Debug, "GDB Can't stop thread {}", target);
                 return E01;
             }
-            waitpid_responder = waitpid(target, &status, 0);
+            waitpid_responder = predator->Wait(target, &status, 0);
             if (waitpid_responder == -1) {
                 LOG_ERROR(Debug, "GDB Child can't get interrupted {}", target);
                 return E01;
@@ -162,16 +159,16 @@ std::string HandlePacket(GdbCommand cmd) {
         // else is omitted, if not selected we want all threads
         LOG_INFO(Debug, "Interrupting all threads");
         bool wasError = false;
-        for (auto [tid, _] : g_system_state.threads) {
-            if (ptrace(PTRACE_INTERRUPT, tid, nullptr, nullptr) == -1) {
+        for (auto [tid, _] : predator->threads) {
+            if (!predator->ChildThreadInterrupt(tid)) {
                 wasError = true;
                 LOG_ERROR(Debug, "GDB Cannot continue thread {}", tid);
             }
         }
 
         // Detection by elimination lol
-        std::vector<ThreadID> stopped_threads_NOT(std::views::keys(g_system_state.threads).begin(),
-                                                  std::views::keys(g_system_state.threads).end());
+        std::vector<ThreadID> stopped_threads_NOT(std::views::keys(predator->threads).begin(),
+                                                  std::views::keys(predator->threads).end());
         bool all_stopped = false;
         while (!all_stopped) {
             waitpid_responder = waitpid(-1, &status, __WALL);
@@ -203,13 +200,8 @@ std::string HandlePacket(GdbCommand cmd) {
             all_stopped = stopped_threads_NOT.empty();
         }
 
-        // normal stop reply packet, same as stops for '?'
         LOG_ERROR(Debug, "All threads stopped");
         return "T02";
-        // however...
-        // T AA format allows for passing information like
-        // breakpoints (sigtrap/user), forks and other events
-        // so... basically a wrapper for ptrace.
     }
 
     if (maincmd == '?') {
@@ -235,20 +227,17 @@ std::string HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'g') {
-        ThreadID target = g_system_state.thread_sel_reg_dump;
+        ThreadID target = predator->thread_sel_reg_dump;
 
-        struct user_regs_struct* regs = &g_system_state.user_regs;
-        struct user_fpregs_struct* fpregs = &g_system_state.user_fpregs;
-        if (!child_thread_dump_regs(target, regs, fpregs)) {
+        if (!predator->DumpRegs(target)) {
             LOG_ERROR(Debug, "GDB Can't read registers of thread {}", target);
             return E01;
         }
-        g_system_state.user_regs_dirty = false;
-        return PrintRegisters(regs, fpregs);
+        return PrintRegisters(&predator->user_regs, &predator->user_fpregs);
     }
 
     if (maincmd == 'p') {
-        if (g_system_state.user_regs_dirty) {
+        if (predator->user_regs_dirty) {
             // didn't send Hg packet to switch threads
             // or (idk) ran the target (TODO)
             LOG_ERROR(Debug, "GDB didn't refresh registers after changing target/running thread");
@@ -260,42 +249,43 @@ std::string HandlePacket(GdbCommand cmd) {
         default:
             break;
         case 0x3A:
-            return ByteSwap(g_system_state.user_regs.fs_base, 16);
+            return ByteSwap(predator->user_regs.fs_base, 16);
         case 0x3B:
-            return ByteSwap(g_system_state.user_regs.gs_base, 16);
+            return ByteSwap(predator->user_regs.gs_base, 16);
         }
         return "xxxxxxxxxxxxxxxx";
     }
 
     if (maincmd == 'H') {
+        LOG_ERROR(Debug, "This fucks shit up if encoded TID starts with a letter ._.");
         ThreadID ttid = std::stoul(cmd.arg, nullptr, 16);
         ThreadID* threadActionTarget = nullptr;
 
         char subcmd = cmd.cmd[1];
 
         if (subcmd == 'g') {
-            threadActionTarget = &g_system_state.thread_sel_reg_dump;
+            threadActionTarget = &predator->thread_sel_reg_dump;
         }
         if (subcmd == 'c') {
-            threadActionTarget = &g_system_state.thread_sel_flow;
+            threadActionTarget = &predator->thread_sel_flow;
         }
 
         if (threadActionTarget != nullptr) {
             if (ttid == 0) {
-                *threadActionTarget = g_system_state.thread_main;
+                *threadActionTarget = predator->_main_thread;
                 LOG_WARNING(Debug, "GDB H[{}] packet -> selected main thread ({})", subcmd,
                             *threadActionTarget);
             } else if (ttid == -1) {
                 LOG_WARNING(Debug, "GDB H[{}] packet -> all threads", subcmd);
                 *threadActionTarget = -1;
-            } else if (g_system_state.threads.find(ttid) != g_system_state.threads.end()) {
+            } else if (predator->FindThread(ttid) != nullptr) {
                 LOG_WARNING(Debug, "GDB H[{}] packet -> selected thread {}", subcmd, ttid);
                 *threadActionTarget = ttid;
             } else {
-                LOG_ERROR(Debug, "GDB H[{}] requested nonexistent PID:{}", subcmd, ttid);
+                LOG_ERROR(Debug, "GDB H[{}] requested nonexistent thread {}", subcmd, ttid);
                 return E01;
             }
-            g_system_state.user_regs_dirty = true;
+            predator->RegDumpInvalidate();
             return OK;
         }
         LOG_ERROR(Debug, "Cannot parse argument for H packet");
@@ -326,7 +316,7 @@ std::string HandlePacket(GdbCommand cmd) {
         }
         if (cmd.cmd == "qC") {
             // target disputable, works for now
-            return std::format("QC{:x}", g_system_state.thread_sel_reg_dump);
+            return std::format("QC{:x}", predator->thread_sel_reg_dump);
         }
         if (cmd.cmd == "qAttached") {
             return "1";
@@ -437,38 +427,14 @@ std::string MakeResponse(const std::string msg) {
     return MakeResponseImpl(msg);
 }
 
-void ThreadRegister(ThreadID tid) {
-    // Give it a temporary name
-    g_system_state.threads[tid] = std::format("Thr{}", tid);
-}
-
-void ThreadUnregister(ThreadID tid) {
-    if (g_system_state.thread_main == tid) {
-        LOG_WARNING(Debug, "Main thread unregistered: {}", tid);
-        g_system_state.thread_main = -1;
-    }
-    g_system_state.threads.erase(tid);
-}
-
-void ThreadRefresh(void) {
-    bool thrfnd = false;
-    for (auto& [tid, name] : g_system_state.threads) {
-        std::string thrName = child_thread_name(tid);
-        name = thrName;
-        if (tid == g_system_state.thread_sel_reg_dump)
-            thrfnd = true;
-    }
-    if (!thrfnd)
-        g_system_state.thread_sel_reg_dump = g_system_state.thread_main;
-}
-
 std::string ThreadList() {
-    ThreadRefresh();
+    predator->ThreadRefresh();
     std::string buffer = "";
     buffer += R"*(l<?xml version="1.0"?><threads>)*";
 
-    for (auto& [tid, name] : g_system_state.threads) {
-        buffer += fmt::format(R"*(<thread id="{:x}" name="{}" handle="{:x}"/>)*", tid, name, tid);
+    for (auto [tid, thread_info] : predator->threads) {
+        buffer += fmt::format(R"*(<thread id="{:x}" name="{}" handle="{:x}"/>)*", tid,
+                              thread_info.name, tid);
     }
 
     buffer += "</threads>";

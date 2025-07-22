@@ -2,45 +2,110 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <fstream>
+#include <unordered_map>
 
 #include <sys/ptrace.h>
+#include <sys/signal.h>
 #include <sys/user.h>
 #include <sys/wait.h>
 
 #include "childtools.h"
+#include "common/logging/log.h"
+#include "common/types.h"
 #include "threadinfo.h"
 
-bool child_continue(ThreadID target, int signal) {
-    return ptrace(PTRACE_CONT, target, NULL, signal) != -1;
+#define SIGTRAP_SYSCALL (SIGTRAP | 0x80)
+
+// remember to waitpid()!!!
+// we assume thread is stopped on a SIGTRAP/SIGSTOP already (new child)
+bool Predator::ChildThreadHijack(ThreadID target) {
+    if (ptrace(PTRACE_SEIZE, target, NULL,
+               PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD) == -1) {
+        return false;
+    }
+
+    thread_state_t new_thread = {.tid = target,
+                                 .name = std::format("Thr{}", target), ///< Temporary name
+                                 .signal = SIGTRAP};
+    new_thread.running = false;
+    new_thread.name.reserve(20);
+    this->threads[target] = new_thread;
+    return true;
 }
 
-bool child_hijack(ThreadID target) {
-    ThreadID stopped_thread = waitpid(target, nullptr, WSTOPPED);
-    if (stopped_thread != target)
+bool Predator::ChildThreadContinue(ThreadID target, int signal) {
+    thread_state_t* thread = this->FindThread(target);
+    if (thread == nullptr) {
+        return false;
+    }
+
+    if (!thread->running) {
+        if (ptrace(PTRACE_CONT, target, NULL, signal) == -1) {
+            return false;
+        }
+    }
+
+    thread->running = true;
+    thread->signal = SIGCONT;
+    return true;
+}
+
+ThreadID Predator::Wait(ThreadID target, int* status, int options) {
+    ThreadID receiver = waitpid(target, status, options);
+    return receiver;
+}
+
+u8 Predator::IsRunning(ThreadID target) {
+    thread_state_t* thread = this->FindThread(target);
+    if (thread == nullptr)
+        return -1;
+
+    return thread->running ? 1 : 0;
+}
+
+bool Predator::ChildThreadInterrupt(ThreadID target) {
+    if (ptrace(PTRACE_INTERRUPT, target, NULL, signal) == -1)
         return false;
 
-    if (ptrace(PTRACE_SEIZE, stopped_thread, NULL, NULL) == -1)
+    int status{};
+    if (!this->Wait(target, &status, 0))
         return false;
-    if (ptrace(PTRACE_SETOPTIONS, stopped_thread, 0,
-               PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD) == -1)
+
+    if (!child_thread_stopped(status) && (child_thread_stop_reason(status) != SIGTRAP))
         return false;
+
+    thread_state_t* thread = &this->threads[target];
+    thread->running = false;
+    thread->signal = SIGTRAP;
+    return true;
+}
+
+bool Predator::ChildThreadRemove(ThreadID target) {
+    // errors if no or multiple children are removed
+    // shouldn't happen though
+    if (target == this->_main_thread) {
+        LOG_WARNING(Debug, "Main thread unregistered!");
+        LOG_ERROR(Debug, "Consider killing the child");
+    }
+    return this->threads.erase(target) == 1;
+}
+
+bool Predator::DumpRegs(ThreadID target) {
+    if (this->IsRunning(target))
+        return false;
+
+    if (ptrace(PTRACE_GETREGS, target, nullptr, &this->user_regs) == -1) {
+        return false;
+    }
+    if (ptrace(PTRACE_GETFPREGS, target, nullptr, &this->user_fpregs) == -1) {
+        return false;
+    }
+    this->user_regs_dirty = false;
 
     return true;
 }
 
-bool child_thread_dump_regs(ThreadID target, struct user_regs_struct* regs,
-                            struct user_fpregs_struct* fpregs) {
-    if (ptrace(PTRACE_GETREGS, target, nullptr, regs) == -1) {
-        return false;
-    }
-    if (ptrace(PTRACE_GETFPREGS, target, nullptr, fpregs) == -1) {
-        return false;
-    }
-
-    return true;
-}
-
-std::string child_thread_name(ThreadID target) {
+std::string Predator::ThreadName(ThreadID target) {
     // pthread can't pull out name if it belongs to other process
     // just... really?
     // pthread_getname_np(target, buf, 16);
@@ -52,6 +117,40 @@ std::string child_thread_name(ThreadID target) {
     std::string name;
     std::getline(thread_name_file_unix, name);
     return name;
+}
+
+void Predator::ThreadRefresh(void) {
+    bool reg_dump_target_found = false;
+    bool flow_ctrl_target_found = false;
+    for (auto& [tid, info] : this->threads) {
+        std::string thrName = this->ThreadName(tid);
+        info.name = thrName;
+
+        if (tid == this->thread_sel_reg_dump)
+            reg_dump_target_found = true;
+        if (tid == this->thread_sel_flow)
+            flow_ctrl_target_found = true;
+    }
+
+    if (!reg_dump_target_found) {
+        LOG_ERROR(Debug, "Stub didn't notice disappearing thread {}", this->thread_sel_reg_dump);
+        this->thread_sel_reg_dump = this->_main_thread;
+    }
+    if (!flow_ctrl_target_found) {
+        LOG_ERROR(Debug, "Stub didn't notice disappearing thread {}", this->thread_sel_flow);
+        this->thread_sel_flow = this->_main_thread;
+    }
+}
+
+void Predator::RegDumpInvalidate() {
+    this->user_regs_dirty = true;
+}
+
+thread_state_t* Predator::FindThread(ThreadID target) {
+    auto thread_found = this->threads.find(target);
+    if (thread_found == this->threads.end())
+        return nullptr;
+    return &thread_found->second;
 }
 
 bool child_thread_stopped(int status) {
@@ -87,5 +186,5 @@ bool child_thread_evt_exit(int status) {
 }
 
 bool child_thread_sigtrap_is_syscall(int status) {
-    return status >> 8 == (SIGTRAP | 0x80);
+    return status >> 8 == SIGTRAP_SYSCALL;
 }

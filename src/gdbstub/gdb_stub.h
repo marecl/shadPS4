@@ -11,6 +11,7 @@
 
 #include <sys/user.h>
 
+#include "childtools.h"
 #include "common/types.h"
 #include "threadinfo.h"
 
@@ -22,21 +23,7 @@ extern const char* const OK;
 extern const char* const E01;
 extern const char* const touch_grass;
 
-// move this to a separate class, so stub and main can have access to it
-// also, childtools
-struct system_state_t {
-    std::unordered_map<pid_t, std::string> threads{}; ///< TID + name
-    std::unordered_map<pid_t, u8> threads_running{};  ///< TID + latest signal sent/received (TODO)
-    ThreadID thread_main = -1;                        ///< make this const at program startup??
-    // in case if gdb can select multiple threads, be prepared to turn these into vectors
-    ThreadID thread_sel_reg_dump = -1;       ///< selected for g-action
-    ThreadID thread_sel_flow = -1;           ///< selected for s/c/t action
-    bool user_regs_dirty = true;             ///< thread changed, true if regs weren't updated
-    struct user_regs_struct user_regs{};     ///< latest thread regs dump
-    struct user_fpregs_struct user_fpregs{}; ///< latest thread floating point regs dump
-};
-
-extern struct system_state_t g_system_state;
+extern Predator* predator;
 
 enum class ControlCode : char {
     Ack = '+',
@@ -65,10 +52,6 @@ LoopAction Loop(std::string message, std::string& response);
 s8 HandleContinuous(GdbCommand cmd);
 std::string HandlePacket(GdbCommand cmd);
 
-// these 3 to the same class as childtools
-void ThreadRegister(ThreadID id);
-void ThreadUnregister(ThreadID id);
-void ThreadRefresh(void);
 
 // printing for gdb
 std::string ThreadList(void);

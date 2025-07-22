@@ -36,15 +36,29 @@ int main(int argc, char* argv[]) {
         Common::Log::Initialize();
         Common::Log::Start();
 
-        if (!child_hijack(target)) {
+        StubServer srv(13377);
+        Predator ct(target);
+        Core::Devtools::GdbStub::predator = &ct;
+
+        srv.Start();
+
+        int wait_pid_status{};
+        if (!ct.Wait(target, &wait_pid_status, WSTOPPED)) {
+
+            if (child_thread_stop_reason(wait_pid_status) != SIGSTOP) {
+                LOG_ERROR(Debug, "Child didn't stop with expected code");
+                return -1;
+            }
+            LOG_ERROR(Debug, "Child didn't do anything");
+            return -1;
+        }
+
+        if (!ct.ChildThreadHijack(target)) {
             LOG_ERROR(Debug, "[-] Cannot seize thread {}", target);
             return -1;
         }
-        LOG_INFO(Debug, "[*] Thread {} seized", target);
-        Core::Devtools::GdbStub::ThreadRegister(target);
 
-        StubServer srv(13377);
-        srv.Start();
+        LOG_INFO(Debug, "[*] Thread {} seized", target);
 
         // wait for GDB
         // we're holding child thread stopped in case if the user
@@ -52,23 +66,17 @@ int main(int argc, char* argv[]) {
         sleep(1);
         if (!srv.ClientConnected()) {
             // if GDB is not connected, continue as normal
-            if (!child_continue(target)) {
+            if (!ct.ChildThreadContinue(target)) {
                 LOG_ERROR(Debug, "Cannot wake up child {}", target);
                 return -1;
             }
         }
 
-        // Rebuild just in case. On init there's only one thread active anyway
-        Core::Devtools::GdbStub::ThreadRefresh();
-        Core::Devtools::GdbStub::g_system_state.thread_sel_reg_dump = target;
-        Core::Devtools::GdbStub::g_system_state.thread_sel_flow = target;
-        Core::Devtools::GdbStub::g_system_state.thread_main = target;
-
-        // keep there for '-' packet
+        // could link it directly to server, but let's keep it in case of getting '-' packet
         std::string response{};
         std::string msg{};
-
         bool do_continue_what_you_do = true;
+
         while (do_continue_what_you_do) {
             using namespace Core::Devtools;
 
@@ -80,17 +88,14 @@ int main(int argc, char* argv[]) {
                     srv.SendMessage(GdbStub::MakeResponse(GdbStub::E01));
                     break;
                 case GdbStub::LoopAction::EXIT:
-                    do_continue_what_you_do = false;
+                    kill(target, SIGTERM);
                     break;
-                case GdbStub::LoopAction::BACK_TO_SENDER:
+                case GdbStub::LoopAction::BACK_TO_SENDER: ///< as-is
                     srv.SendMessage(msg);
                     break;
-                case GdbStub::LoopAction::REPEAT:
-                    // Response is unmodified
-                    srv.SendMessage(GdbStub::MakeResponse(response));
-                    break;
-                case GdbStub::LoopAction::SEND:
-                    // Response is modified
+                case GdbStub::LoopAction::REPEAT: ///< Response is not modified
+                case GdbStub::LoopAction::SEND:   ///< Response is modified
+
                     srv.SendMessage(GdbStub::MakeResponse(response));
                     break;
                 case GdbStub::LoopAction::NOSEND:
@@ -98,8 +103,13 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            if (ct.FindThread(target) == nullptr) {
+                LOG_INFO(Debug, "main exit lol");
+                do_continue_what_you_do = false;
+            }
+
             int status = 0;
-            pid_t tid = waitpid(-1, &status, __WALL | WNOHANG);
+            ThreadID tid = ct.Wait(-1, &status, __WALL);
             if (tid == 0) {
                 continue;
             }
@@ -107,46 +117,31 @@ int main(int argc, char* argv[]) {
                 break;
             }
 
-            if (child_thread_stopped(status)) {
-                if (child_thread_stop_reason(status) == SIGSEGV) {
-                    siginfo_t info;
-                    if (ptrace(PTRACE_GETSIGINFO, tid, 0, &info) == 0) {
-                        // Apparently we DO like this particular kind (Linux only?)
-                        if (info.si_code != SEGV_ACCERR) {
-                            // The rest is highly undesired
-                            struct user_regs_struct regs;
-                            ptrace(PTRACE_GETREGS, tid, 0, &regs);
+            if (!child_thread_stopped(status))
+                continue;
 
-                            LOG_ERROR(Debug,
-                                      "[*] Thread {} got undesired SIGSEGV {:X} at RIP=0x{:X} (:X)",
-                                      tid, regs.rip, regs.rip - 0x7FF000000);
-                        }
-                        child_continue(tid, SIGSEGV);
-                        // I might regret adding this
-                        // GdbStub::g_system_state.running = true;
+            int stop_reason = child_thread_stop_reason(status);
+
+            if (stop_reason == SIGTRAP) {
+                LOG_INFO(Debug, "[*] Thread {} got SIGTRAP", tid);
+            } else if (stop_reason == SIGSEGV) {
+                siginfo_t info;
+                if (ptrace(PTRACE_GETSIGINFO, tid, 0, &info) == 0) {
+                    // Apparently we DO like this particular kind (Linux only?)
+                    if (info.si_code != SEGV_ACCERR) {
+                        // The rest is highly undesired
+
+                        ct.DumpRegs(tid);
+                        LOG_ERROR(
+                            Debug, "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)",
+                            tid, info.si_code, ct.user_regs.rip, ct.user_regs.rip - 0x7FF000000);
                     }
 
-                } else if (child_thread_stop_reason(status) == SIGTRAP) {
-                    LOG_INFO(Debug, "[*] Thread {} got SIGTRAP {:X}", tid,
-                             child_thread_stop_reason(status));
-                    // GdbStub::g_system_state.running = false;
-                } else if (child_thread_sigtrap_is_syscall(status)) {
-                    LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP {:X}", tid,
-                             child_thread_stop_reason(status));
-                    // GdbStub::g_system_state.running = false;
-                    //  child_continue(tid);
-                } else {
-                    LOG_INFO(Debug, "[*] Thread {} stopped with signal {:X}", tid,
-                             child_thread_stop_reason(status));
-                    // GdbStub::g_system_state.running = false;
+                    ct.ChildThreadContinue(tid, SIGSEGV);
+                    continue;
                 }
-
-            } else if (child_thread_exited(status)) {
-                LOG_INFO(Debug, "[-] Thread {} ended with code {:X}", tid,
-                         child_thread_exit_reason(status));
-            } else if (child_thread_killed(status)) {
-                LOG_INFO(Debug, "[-] Thread {} was killed with {:X}", tid,
-                         child_thread_kill_reason(status));
+            } else {
+                LOG_INFO(Debug, "[*] Thread {} stopped with signal {:02}", tid, stop_reason);
             }
 
             if (child_thread_evt_clone(status)) {
@@ -155,29 +150,38 @@ int main(int argc, char* argv[]) {
 
                 LOG_INFO(Debug, "[+] New thread/process: {}", new_tid);
 
-                ptrace(PTRACE_SEIZE, new_tid, nullptr, nullptr);
-                ptrace(PTRACE_SETOPTIONS, new_tid, nullptr,
-                       PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD);
-
-                GdbStub::ThreadRegister(new_tid);
-
-                child_continue(new_tid);
-                child_continue(tid);
-                // GdbStub::g_system_state.running = true;
-            }
-            if (child_thread_evt_exit(status)) {
-                LOG_INFO(Debug, "[-] Thread {} ends with status {:X}", tid, status);
-                GdbStub::ThreadUnregister(tid);
-                if (tid == target) {
-                    break;
+                if (!ct.ChildThreadHijack(new_tid)) {
+                    LOG_ERROR(Debug, "[!] Can't hijack new thread {}", new_tid);
                 }
+
+                ct.ChildThreadContinue(tid);
+                ct.ChildThreadContinue(new_tid);
+            }
+
+            // thread is on the brink of exiting
+            if (child_thread_evt_exit(status)) {
+                LOG_INFO(Debug, "[-] Thread {} exits with status {}", tid, status);
+                ct.ChildThreadRemove(tid);
+            }
+
+            if (child_thread_exited(status)) {
+                LOG_INFO(Debug, "[-] Thread {} exited with code {:02}", tid,
+                         child_thread_exit_reason(status));
+            }
+
+            if (child_thread_sigtrap_is_syscall(status)) {
+                LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP", tid);
+                ct.ChildThreadContinue(tid);
+            }
+            if (child_thread_killed(status)) {
+                LOG_INFO(Debug, "[-] Thread {} was killed with {:02}", tid,
+                         child_thread_kill_reason(status));
             }
         }
 
         srv.Stop();
-    } else {
+    } else { ///< if (target > 0)
         std::cout << "Fork error" << std::endl;
     }
-
     return 0;
 }
