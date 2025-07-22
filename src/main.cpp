@@ -88,7 +88,7 @@ int main(int argc, char* argv[]) {
                     srv.SendMessage(GdbStub::MakeResponse(GdbStub::E01));
                     break;
                 case GdbStub::LoopAction::EXIT:
-                    kill(target, SIGTERM);
+                    // kill(target, SIGTERM);
                     break;
                 case GdbStub::LoopAction::BACK_TO_SENDER: ///< as-is
                     srv.SendMessage(msg);
@@ -124,6 +124,9 @@ int main(int argc, char* argv[]) {
 
             if (stop_reason == SIGTRAP) {
                 LOG_INFO(Debug, "[*] Thread {} got SIGTRAP", tid);
+            } else if (child_thread_sigtrap_is_syscall(status)) {
+                LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP", tid);
+                //  ct.ChildThreadContinue(tid);
             } else if (stop_reason == SIGSEGV) {
                 siginfo_t info;
                 if (ptrace(PTRACE_GETSIGINFO, tid, 0, &info) == 0) {
@@ -169,10 +172,6 @@ int main(int argc, char* argv[]) {
                          child_thread_exit_reason(status));
             }
 
-            if (child_thread_sigtrap_is_syscall(status)) {
-                LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP", tid);
-                ct.ChildThreadContinue(tid);
-            }
             if (child_thread_killed(status)) {
                 LOG_INFO(Debug, "[-] Thread {} was killed with {:02}", tid,
                          child_thread_kill_reason(status));
