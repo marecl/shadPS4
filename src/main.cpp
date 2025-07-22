@@ -43,13 +43,9 @@ int main(int argc, char* argv[]) {
         srv.Start();
 
         int wait_pid_status{};
-        if (!ct.Wait(target, &wait_pid_status, WSTOPPED)) {
-
-            if (child_thread_stop_reason(wait_pid_status) != SIGSTOP) {
-                LOG_ERROR(Debug, "Child didn't stop with expected code");
-                return -1;
-            }
-            LOG_ERROR(Debug, "Child didn't do anything");
+        ThreadID is_target = ct.Wait(target, &wait_pid_status, WSTOPPED);
+        if (is_target != target && !child_thread_stopped(wait_pid_status)) {
+            LOG_ERROR(Debug, "[!] Child didn't stop properly, doesn't exist or idk");
             return -1;
         }
 
@@ -59,6 +55,7 @@ int main(int argc, char* argv[]) {
         }
 
         LOG_INFO(Debug, "[*] Thread {} seized", target);
+        ct.ChildThreadRegister(target, SIGSTOP);
 
         // wait for GDB
         // we're holding child thread stopped in case if the user
@@ -95,7 +92,6 @@ int main(int argc, char* argv[]) {
                     break;
                 case GdbStub::LoopAction::REPEAT: ///< Response is not modified
                 case GdbStub::LoopAction::SEND:   ///< Response is modified
-
                     srv.SendMessage(GdbStub::MakeResponse(response));
                     break;
                 case GdbStub::LoopAction::NOSEND:
@@ -151,11 +147,11 @@ int main(int argc, char* argv[]) {
                 unsigned long new_tid = 0;
                 ptrace(PTRACE_GETEVENTMSG, tid, nullptr, &new_tid);
 
+                // Apparently children are automatically traced when PTRACE_O_TRACECLONE is
+                // specified O.o
+                // So I don't need to seize them again
                 LOG_INFO(Debug, "[+] New thread/process: {}", new_tid);
-
-                if (!ct.ChildThreadHijack(new_tid)) {
-                    LOG_ERROR(Debug, "[!] Can't hijack new thread {}", new_tid);
-                }
+                ct.ChildThreadRegister(new_tid);
 
                 ct.ChildThreadContinue(tid);
                 ct.ChildThreadContinue(new_tid);

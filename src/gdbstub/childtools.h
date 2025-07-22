@@ -13,12 +13,11 @@
 #include "threadinfo.h"
 
 enum SignalStop : int { STOP = SIGSTOP, INTERRUPT = SIGINT, TRAP = SIGTRAP };
-
 typedef struct _thread_state_t {
     ThreadID tid = -1;
     std::string name{};
     bool running{false};
-    u8 signal{0};
+    int signal{0};
 } thread_state_t;
 
 class Predator {
@@ -31,8 +30,10 @@ public:
     // Flow control
 
     bool ChildThreadHijack(ThreadID target);
+    void ChildThreadRegister(ThreadID target, int signal = SIGCONT);
     bool ChildThreadContinue(ThreadID target, int signal = SIGCONT);
-    ThreadID Wait(ThreadID target, int* status, int options); ///< possibly split into __WALL, WSTOPPED
+    ThreadID Wait(ThreadID target, int* status,
+                  int options); ///< possibly split into __WALL, WSTOPPED
     u8 IsRunning(ThreadID target);
     bool ChildThreadInterrupt(ThreadID target);
     bool ChildThreadRemove(ThreadID target);

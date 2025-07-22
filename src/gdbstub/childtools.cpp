@@ -19,18 +19,17 @@
 // remember to waitpid()!!!
 // we assume thread is stopped on a SIGTRAP/SIGSTOP already (new child)
 bool Predator::ChildThreadHijack(ThreadID target) {
-    if (ptrace(PTRACE_SEIZE, target, NULL,
-               PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD) == -1) {
-        return false;
-    }
+    return -1 != ptrace(PTRACE_SEIZE, target, NULL,
+                        PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD);
+}
 
+void Predator::ChildThreadRegister(ThreadID target, int signal) {
     thread_state_t new_thread = {.tid = target,
                                  .name = std::format("Thr{}", target), ///< Temporary name
-                                 .signal = SIGTRAP};
-    new_thread.running = false;
+                                 .signal = signal};
+    new_thread.running = (signal == SIGCONT); ///< Only this one allows execution
     new_thread.name.reserve(20);
     this->threads[target] = new_thread;
-    return true;
 }
 
 bool Predator::ChildThreadContinue(ThreadID target, int signal) {
