@@ -23,19 +23,19 @@
 static std::string decerrno(void) {
     switch (errno) {
     default:
-        return "EXD. huj wie";
+        return "EXD";
     case EBUSY:
-        return "EBUSY. Allocating Debug Registry";
+        return "EBUSY";
     case EFAULT:
-        return "EFAULT. Invalid mem r/w";
+        return "EFAULT";
     case EINVAL:
-        return "EINVAL. Invalid option";
+        return "EINVAL";
     case EIO:
-        return "EIO. Invalid mem r/w";
+        return "EIO";
     case EPERM:
-        return "EPERM. Nie wydymasz Freda bo Fred juz dyma ciebie";
+        return "EPERM";
     case ESRCH:
-        return "ESRCH. Nonexistent";
+        return "ESRCH";
     }
 }
 
@@ -127,10 +127,6 @@ u8 Predator::IsRunning(ThreadID target) {
     return thread->running ? 1 : 0;
 }
 
-/**
- * Interrupt a list of children AND WAIT FOR THEM!
- * Possibly do the same as with continue; Interrupt (single,unless main), InterruptAll
- */
 bool Predator::ChildThreadInterrupt(ThreadID target) {
     LOG_INFO(Debug, "Interrupting thread {}", target);
     thread_state_t* thread_info = this->FindThread(target);
@@ -152,7 +148,7 @@ bool Predator::ChildThreadInterrupt(ThreadID target) {
         return false;
     }
 
-    if (child_thread_stopped(evt.status) && child_thread_stop_reason(evt.status) == SIGINT) {
+    if (child_thread_stopped(evt.status) && child_thread_stop_reason(evt.status) == SIGSTOP) {
         LOG_INFO(Debug, "[!] Thread {} interrupted successfully", evt.tid);
         thread_state_t* target_thread = this->FindThread(evt.tid);
         target_thread->running = false;
@@ -187,7 +183,7 @@ bool Predator::ChildThreadInterruptAll(void) {
         }
 
         if (child_thread_stopped(evt.status) && child_thread_stop_reason(evt.status) == SIGSTOP) {
-            //LOG_INFO(Debug, "[!] Thread {} interrupted successfully", evt.tid);
+            // LOG_INFO(Debug, "[!] Thread {} interrupted successfully", evt.tid);
             thread_state_t* target_thread = this->FindThread(evt.tid);
             target_thread->running = false;
             target_thread->signal = SIGINT;
@@ -274,10 +270,10 @@ void Predator::RegDumpInvalidate(void) {
 }
 
 thread_state_t* Predator::FindThread(ThreadID target) {
-    auto thread_found = this->threads.find(target);
-    if (thread_found == this->threads.end())
+    auto target_found = this->threads.find(target);
+    if (target_found == this->threads.end())
         return nullptr;
-    return &thread_found->second;
+    return &target_found->second;
 }
 
 bool child_thread_stopped(int status) {

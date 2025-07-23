@@ -8,7 +8,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <fmt/xchar.h>
 #include <sys/ptrace.h>
 #include <sys/user.h>
 #include <sys/wait.h>

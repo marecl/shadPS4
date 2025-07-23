@@ -9,11 +9,9 @@
 #include <thread>
 #include <queue>
 
-#include "common/types.h"
-
 class StubServer {
 public:
-    StubServer(const u16 port) : _port(port), _running(false), _socket_server(-1) {};
+    StubServer(const int port) : _port(port), _running(false), _socket_server(-1) {};
     ~StubServer(void) {
         Stop();
     }

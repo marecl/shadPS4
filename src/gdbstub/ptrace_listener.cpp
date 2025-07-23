@@ -1,11 +1,13 @@
+// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <atomic>
 #include <condition_variable>
 #include <csignal>
-#include <iostream>
 #include <mutex>
 #include <thread>
 #include <queue>
+
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -56,7 +58,6 @@ void PtraceListener::Loop() {
             _cv.notify_one();
         } else {
             if (errno == ECHILD) {
-                std::cout << "Akcja defekacja\n";
                 break;
             }
             if (errno != EINTR)

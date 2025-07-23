@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 #ifndef PTRACE_LISTENER_H
 #define PTRACE_LISTENER_H
 
@@ -10,6 +13,10 @@
 #include <unistd.h>
 
 #include "threadinfo.h"
+
+/**
+ * Listener for thread events (ptrace)
+ */
 
 typedef struct _thread_event_t {
     ThreadID tid;
