@@ -34,13 +34,17 @@ public:
     bool ChildThreadHijack(ThreadID target);
     // Default signal for continuing is 0, SIGCONT doesn't really exist in GDB
     void ChildThreadRegister(ThreadID target, int signal = 0);
-    bool ChildThreadContinue(ThreadID target, int signal = 0, bool just_shut_the_fuck_up_about_the_segfaults_please =false);
+    bool ChildThreadContinue(ThreadID target, int signal = 0,
+                             bool just_shut_the_fuck_up_about_the_segfaults_please = false);
     bool ChildThreadContinueAll(int signal = 0);
     ThreadID Wait(ThreadID target, int* status,
                   int options); ///< possibly split into __WALL, WSTOPPED
     u8 IsRunning(ThreadID target);
     bool ChildThreadInterrupt(ThreadID target);
     bool ChildThreadInterruptAll(void);
+    /**
+     * Remove thread from tracked list. 0 for main
+     */
     bool ChildThreadRemove(ThreadID target);
 
     // Metadata
@@ -62,6 +66,9 @@ public:
      * dumped after changing target thread or continuing execution.
      */
     void RegDumpInvalidate(void);
+    /**
+     * Find thread state. 0 for main.
+     */
     thread_state_t* FindThread(ThreadID target);
 
     // Misc, static pro publico bono

@@ -95,7 +95,7 @@ bool Predator::ChildThreadContinueAll(int signal) {
 
     bool was_error = false;
     for (auto& [tid, state] : this->threads) {
-        LOG_ERROR(Debug, "[+++] Continuing child {}", tid);
+        // LOG_ERROR(Debug, "[+++] Continuing child {}", tid);
 
         if (!state.running) {
             if (ptrace(PTRACE_CONT, tid, NULL, signal) == -1) {
@@ -164,6 +164,8 @@ bool Predator::ChildThreadInterruptAll(void) {
 
     LOG_INFO(Debug, "Interrupting {} thread(s)", this->threads.size());
     for (auto [tid, info] : this->threads) {
+        if (!info.running)
+            continue;
         if (ptrace(PTRACE_INTERRUPT, tid, NULL, 0) == -1) {
             LOG_ERROR(Debug, "[!] Can't interrupt child {} {}", tid, decerrno());
             continue;
@@ -192,7 +194,6 @@ bool Predator::ChildThreadInterruptAll(void) {
             LOG_ERROR(Debug, "One thread did something funky wunky {} {}", evt.tid, erased);
         }
     }
-    LOG_INFO(Debug, "All threads interrupted");
 
     return true;
 }
@@ -200,7 +201,8 @@ bool Predator::ChildThreadInterruptAll(void) {
 bool Predator::ChildThreadRemove(ThreadID target) {
     // errors if no or multiple children are removed
     // shouldn't happen though
-    if (target == this->main_thread) {
+    if (target == 0) {
+        target = this->main_thread;
         LOG_WARNING(Debug, "Main thread unregistered!");
         LOG_ERROR(Debug, "Consider killing the child");
     }
@@ -270,10 +272,11 @@ void Predator::RegDumpInvalidate(void) {
 }
 
 thread_state_t* Predator::FindThread(ThreadID target) {
+    if (target == 0)
+        target = this->main_thread;
     auto target_found = this->threads.find(target);
-    if (target_found == this->threads.end())
-        return nullptr;
-    return &target_found->second;
+
+    return target_found == this->threads.end() ? nullptr : &target_found->second;
 }
 
 bool child_thread_stopped(int status) {

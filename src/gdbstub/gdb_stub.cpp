@@ -103,10 +103,13 @@ s8 HandleContinuous(GdbCommand cmd) {
 
         u8 sig = 0; // take from the argument
 
+        // return 1 - if it throws an error, it will make gdb think the program stopped
         if (target == predator->main_thread) {
-            return predator->ChildThreadContinueAll(sig) ? 1 : -1;
+            predator->ChildThreadContinueAll(sig);
+            return 1;
         }
-        return predator->ChildThreadContinue(target, sig) ? 1 : -1;
+        predator->ChildThreadContinue(target, sig);
+        return 1;
     }
 
     // this is the "running" half that returns nothing if main thread is running
@@ -284,9 +287,9 @@ std::string HandlePacket(GdbCommand cmd) {
             return "1";
         }
         if (cmd.cmd == "qSupported") {
-            // QThreadEvents+ces - probably necessary in the near future
+            //  - probably necessary in the near future
             // binary-upload+ - unnecessary for now, maybe ever
-            std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+";
+            std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+;QThreadEvents+";
             // just in case i'm far enough to need breakpoints
             if (resp.find("swbreak+"))
                 resp += ";swbreak+";

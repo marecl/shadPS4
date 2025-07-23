@@ -29,7 +29,8 @@ int main(int argc, char* argv[]) {
 
     if (child_pid == 0) {
         auto ret = MainReal(argc, argv);
-        exit(ret);
+        std::cout << "Child exited\n";
+        return ret;
 
     } else if (child_pid > 0) {
         prctl(PR_SET_NAME, "shaddebug", 0, 0);
@@ -89,6 +90,10 @@ int main(int argc, char* argv[]) {
 
         while (do_continue_what_you_do) {
 
+            if (thread_state_t* mthr = predator.FindThread(0); mthr == nullptr) {
+                do_continue_what_you_do = false;
+            }
+
             if (stub_server.GetMessage(msg)) {
                 GdbStub::LoopAction send_response = GdbStub::Loop(msg, response);
 
@@ -100,9 +105,9 @@ int main(int argc, char* argv[]) {
                     stub_server.SendMessage(msg);
                     break;
                 case GdbStub::LoopAction::EXIT:
-                    predator.ChildThreadContinueAll();
-                    kill(child_pid, SIGTERM);
-                    do_continue_what_you_do = false;
+                    predator.ChildThreadRemove(0);
+                    stub_server.SendMessage(GdbStub::MakeResponse(GdbStub::OK));
+                    break;
                 case GdbStub::LoopAction::REPEAT: ///< Response is not modified
                 case GdbStub::LoopAction::SEND:   ///< Response is modified
                     stub_server.SendMessage(GdbStub::MakeResponse(response));
@@ -118,6 +123,14 @@ int main(int argc, char* argv[]) {
             if (child_thread_exited(evt.status)) {
                 LOG_INFO(Debug, "[-] Thread {} exited with code {:02}", evt.tid,
                          child_thread_exit_reason(evt.status));
+
+                if (stub_server.ClientConnected()) {
+                    std::string thread_exit_notification =
+                        std::format("w{:02x};{:x};", evt.tid, child_thread_exit_reason(evt.status));
+                    stub_server.SendMessage(GdbStub::MakeResponse(thread_exit_notification));
+                } else
+
+                    predator.ChildThreadContinue(evt.tid);
                 continue;
             }
 
@@ -154,15 +167,27 @@ int main(int argc, char* argv[]) {
                     thread_event_t clone_evt = ptrace_listener.Wait();
 
                     predator.ChildThreadRegister(clone_evt.tid, SIGSTOP);
+                    predator.ChildThreadInterruptAll();
 
-                    predator.ChildThreadContinue(evt.tid);
-                    predator.ChildThreadContinue(clone_evt.tid);
+                    if (stub_server.ClientConnected()) {
+                        std::string thread_creation_notification =
+                            std::format("T05create:{:x};", clone_evt.tid);
+                        stub_server.SendMessage(
+                            GdbStub::MakeResponse(thread_creation_notification));
+                    } else {
+                        predator.ChildThreadContinueAll();
+                    }
+
+                    //  predator.ChildThreadContinue(evt.tid);
+                    // predator.ChildThreadContinue(clone_evt.tid);
+
                     continue;
                 }
 
                 if (child_thread_evt_exit(evt.status)) {
                     LOG_INFO(Debug, "[-] Thread {} exits with status {}", evt.tid, evt.status);
                     predator.ChildThreadRemove(evt.tid);
+                    predator.ChildThreadContinue(evt.tid);
                     continue;
                 }
                 // no other events, carry on
@@ -202,11 +227,14 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        LOG_INFO(Debug, "Parent exited");
+        ptrace(PTRACE_DETACH, child_pid, nullptr, nullptr);
+        kill(child_pid, SIGTERM);
         stub_server.Stop();
         ptrace_listener.Stop();
+        std::cout << "Parent exited\n";
     } else { ///< if (child_pid > 0)
-        std::cout << "Fork error" << std::endl;
+        std::cout << "Fork error\n";
     }
+    std::cout << "Fin\n";
     return 0;
 }
