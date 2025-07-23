@@ -69,6 +69,12 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        is_target = ct.Wait(target, &wait_pid_status, WSTOPPED);
+        if (is_target != target && !child_thread_stopped(wait_pid_status)) {
+            LOG_ERROR(Debug, "[!] Child didn't stop properly, doesn't exist or idk");
+            return -1;
+        }
+
         // could link it directly to server, but let's keep it in case of getting '-' packet
         std::string response{};
         std::string msg{};
@@ -85,7 +91,7 @@ int main(int argc, char* argv[]) {
                     srv.SendMessage(GdbStub::MakeResponse(GdbStub::E01));
                     break;
                 case GdbStub::LoopAction::EXIT:
-                    // kill(target, SIGTERM);
+                    kill(target, SIGTERM);
                     break;
                 case GdbStub::LoopAction::BACK_TO_SENDER: ///< as-is
                     srv.SendMessage(msg);
@@ -105,62 +111,12 @@ int main(int argc, char* argv[]) {
             }
 
             int status = 0;
-            ThreadID tid = ct.Wait(-1, &status, __WALL);
+            ThreadID tid = ct.Wait(-1, &status, __WALL | WNOHANG);
             if (tid == 0) {
                 continue;
             }
             if (tid == -1) {
                 break;
-            }
-
-            if (!child_thread_stopped(status))
-                continue;
-
-            int stop_reason = child_thread_stop_reason(status);
-
-            if (stop_reason == SIGTRAP) {
-                LOG_INFO(Debug, "[*] Thread {} got SIGTRAP", tid);
-            } else if (child_thread_sigtrap_is_syscall(status)) {
-                LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP", tid);
-                //  ct.ChildThreadContinue(tid);
-            } else if (stop_reason == SIGSEGV) {
-                siginfo_t info;
-                if (ptrace(PTRACE_GETSIGINFO, tid, 0, &info) == 0) {
-                    // Apparently we DO like this particular kind (Linux only?)
-                    if (info.si_code != SEGV_ACCERR) {
-                        // The rest is highly undesired
-
-                        ct.DumpRegs(tid);
-                        LOG_ERROR(
-                            Debug, "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)",
-                            tid, info.si_code, ct.user_regs.rip, ct.user_regs.rip - 0x7FF000000);
-                    }
-
-                    ct.ChildThreadContinue(tid, SIGSEGV);
-                    continue;
-                }
-            } else {
-                LOG_INFO(Debug, "[*] Thread {} stopped with signal {:02}", tid, stop_reason);
-            }
-
-            if (child_thread_evt_clone(status)) {
-                unsigned long new_tid = 0;
-                ptrace(PTRACE_GETEVENTMSG, tid, nullptr, &new_tid);
-
-                // Apparently children are automatically traced when PTRACE_O_TRACECLONE is
-                // specified O.o
-                // So I don't need to seize them again
-                LOG_INFO(Debug, "[+] New thread/process: {}", new_tid);
-                ct.ChildThreadRegister(new_tid);
-
-                ct.ChildThreadContinue(tid);
-                ct.ChildThreadContinue(new_tid);
-            }
-
-            // thread is on the brink of exiting
-            if (child_thread_evt_exit(status)) {
-                LOG_INFO(Debug, "[-] Thread {} exits with status {}", tid, status);
-                ct.ChildThreadRemove(tid);
             }
 
             if (child_thread_exited(status)) {
@@ -172,8 +128,76 @@ int main(int argc, char* argv[]) {
                 LOG_INFO(Debug, "[-] Thread {} was killed with {:02}", tid,
                          child_thread_kill_reason(status));
             }
+
+            if (!child_thread_stopped(status))
+                continue;
+
+            int stop_reason = child_thread_stop_reason(status);
+
+            thread_state_t* thr = ct.FindThread(tid);
+            thr->running = false;
+            thr->signal = stop_reason;
+
+            if (child_thread_sigtrap_is_syscall(status)) {
+                LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP", tid);
+                // ct.ChildThreadContinue(tid);
+            }
+
+            if (stop_reason == SIGTRAP) {
+                LOG_INFO(Debug, "[*] Thread {} got SIGTRAP", tid);
+
+                if (child_thread_evt_clone(status)) {
+                    unsigned long new_tid = 0;
+                    ptrace(PTRACE_GETEVENTMSG, tid, nullptr, &new_tid);
+                    LOG_INFO(Debug, "[+] New thread/process: {}", new_tid);
+
+                    // Child will sigstop on its own
+                    // ThreadID responder = ct.Wait(new_tid, nullptr, WSTOPPED);
+
+                    ct.ChildThreadRegister(new_tid);
+
+                    ct.ChildThreadContinue(tid);
+                    // ct.ChildThreadContinue(new_tid);
+                    continue;
+                }
+
+                if (child_thread_evt_exit(status)) {
+                    LOG_INFO(Debug, "[-] Thread {} exits with status {}", tid, status);
+                    ct.ChildThreadRemove(tid);
+                    continue;
+                }
+                // no other events, carry on
+                ct.ChildThreadContinue(tid);
+
+            } else if (stop_reason == SIGSEGV) {
+                siginfo_t info;
+                if (ptrace(PTRACE_GETSIGINFO, tid, 0, &info) == 0) {
+                    // Apparently we DO like this particular kind (Linux only?)
+                    if (info.si_code == SEGV_ACCERR) {
+                        ct.ChildThreadContinue(tid, SIGSEGV);
+                    } else { // The rest is highly undesired
+
+                        ct.DumpRegs(tid);
+                        LOG_ERROR(
+                            Debug, "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)",
+                            tid, info.si_code, ct.user_regs.rip, ct.user_regs.rip - 0x7FF000000);
+                    }
+                }
+            } else if (stop_reason == SIGSTOP) {
+                LOG_INFO(Debug, "[*] Thread {} got SIGSTOP", tid);
+                ct.ChildThreadContinue(tid);
+            } else if (stop_reason == SIGCONT) {
+                LOG_INFO(Debug, "[*] Thread {} continuing", tid);
+                // ct.ChildThreadContinue(tid);
+            } else {
+                LOG_INFO(Debug, "[*] Thread {} stopped with signal {:02}", tid, stop_reason);
+                ct.ChildThreadContinue(tid);
+            }
+
+            // ct.ChildThreadContinue(tid);
         }
 
+        LOG_INFO(Debug, "Parent exited");
         srv.Stop();
     } else { ///< if (target > 0)
         std::cout << "Fork error" << std::endl;

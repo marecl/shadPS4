@@ -5,7 +5,8 @@
 #include <iomanip>
 #include <iostream>
 #include <regex>
-#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include <fmt/xchar.h>
 #include <sys/ptrace.h>
@@ -80,15 +81,15 @@ LoopAction Loop(std::string message, std::string& response) {
             return LoopAction::EXIT;
         }
 
-        LOG_INFO(Debug, "Sent response:\n\tRES: {}", response);
         response = handler_effect;
+        LOG_INFO(Debug, "Sending reply:\n\tRES: {}", response);
         return LoopAction::SEND;
     }
 
     return LoopAction::ERROR;
 }
 
-// -1 fail, 0 N/A, 1 Action done
+// -1 fail, 0 wrong handler, 1 - action done, don't continue in Loop
 // doesn't return anything to client
 s8 HandleContinuous(GdbCommand cmd) {
     char maincmd = cmd.cmd[0];
@@ -97,32 +98,16 @@ s8 HandleContinuous(GdbCommand cmd) {
         LOG_WARNING(Debug, "stub. add SIG argument. don't continue if already running (or it will "
                            "throw an error). ??maybe continuation address??");
         ThreadID target = predator->thread_sel_flow;
-        predator->RegDumpInvalidate();
 
         u8 sig = 0; // take from the argument
 
-        if (target != -1) {
-            LOG_ERROR(Debug, "GDB Continuing thread ", target);
-            if (!predator->ChildThreadContinue(target, sig)) {
-                LOG_ERROR(Debug, "GDB Can't continue thread {}", target);
-                return -1;
-            }
-            return 1;
+        LOG_ERROR(Debug, "GDB Continuing thread {}", target);
+        if (!predator->ChildThreadContinueGroup(target, sig)) {
+            LOG_ERROR(Debug, "GDB Can't continue thread {}", target);
+            return -1;
         }
-
-        LOG_ERROR(Debug, "Continuing all threads");
-
-        bool wasError = false;
-        for (auto [tid, _] : predator->threads) {
-            if (!predator->ChildThreadContinue(tid, sig)) {
-                wasError = true;
-                LOG_ERROR(Debug, "GDB Cannot continue thread {}", tid);
-            }
-        }
-
-        return wasError ? -1 : 1;
+        return 1;
     }
-
     return 0;
 }
 
@@ -138,78 +123,19 @@ std::string HandlePacket(GdbCommand cmd) {
         LOG_WARNING(Debug, "stub. confirm if interrupting an already stopped thread will cause "
                            "ptrace() to throw a fail (even though it's stopped)");
 
-        int status;
-        pid_t waitpid_responder;
-
         ThreadID target = predator->thread_sel_flow;
-        if (target != -1) {
-            LOG_INFO(Debug, "Interrupting thread {}", target);
-            if (ptrace(PTRACE_INTERRUPT, target, nullptr, nullptr) == -1) {
-                LOG_ERROR(Debug, "GDB Can't stop thread {}", target);
-                return E01;
-            }
-            waitpid_responder = predator->Wait(target, &status, 0);
-            if (waitpid_responder == -1) {
-                LOG_ERROR(Debug, "GDB Child can't get interrupted {}", target);
-                return E01;
-            }
-            return "T02";
-        }
 
-        // else is omitted, if not selected we want all threads
-        LOG_INFO(Debug, "Interrupting all threads");
-        bool wasError = false;
-        for (auto [tid, _] : predator->threads) {
-            if (!predator->ChildThreadInterrupt(tid)) {
-                wasError = true;
-                LOG_ERROR(Debug, "GDB Cannot continue thread {}", tid);
-            }
-        }
+        predator->ChildThreadInterrupt(target);
 
-        // Detection by elimination lol
-        std::vector<ThreadID> stopped_threads_NOT(std::views::keys(predator->threads).begin(),
-                                                  std::views::keys(predator->threads).end());
-        bool all_stopped = false;
-        while (!all_stopped) {
-            waitpid_responder = waitpid(-1, &status, __WALL);
-            if (waitpid_responder == -1) {
-                LOG_ERROR(Debug, "Co do huja nawet nie wiem co to oznacza, nie da sie zaczekac na "
-                                 "zjebany proces ktory mial sie przerwac");
-                continue;
-            }
-
-            // FFS TODO: see which one is actually effective. works for now.
-            if (!child_thread_stopped(status))
-                continue;
-
-            if (child_thread_stopped(status)) {
-                if (child_thread_stop_reason(status) == (SIGTRAP | 0x80)) {
-                    LOG_ERROR(Debug, "[*] Thread {} got SYSCALL SIGTRAP", waitpid_responder);
-                } else if (child_thread_stop_reason(status) == SIGTRAP) {
-                    LOG_ERROR(Debug, "[*] Thread {} got SIGTRAP", waitpid_responder);
-                } else {
-                    LOG_ERROR(Debug, "[*] Thread {} stopped with code",
-                              child_thread_stop_reason(status));
-                    continue;
-                }
-            }
-
-            if (std::erase(stopped_threads_NOT, waitpid_responder) == 0) {
-                LOG_ERROR(Debug, "One thread did something funky wunky");
-            }
-            all_stopped = stopped_threads_NOT.empty();
-        }
-
-        LOG_ERROR(Debug, "All threads stopped");
-        return "T02";
+        return "T05";
     }
 
     if (maincmd == '?') {
         LOG_WARNING(Debug, "stub, update stop reason signal,change to T ???and list threads??");
         // so...
         // we need to lie and say the program is stopped
-        // otherwise gdb gets into a weird limbo state, what can only be resolved by yeeting it into
-        // oblivion shad works nice tho
+        // otherwise gdb gets into a weird limbo state, what can only be resolved by yeeting it
+        // into oblivion shad works nice tho
         return "T05";
     }
 
@@ -257,8 +183,13 @@ std::string HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'H') {
-        LOG_ERROR(Debug, "This fucks shit up if encoded TID starts with a letter ._.");
-        ThreadID ttid = std::stoul(cmd.arg, nullptr, 16);
+        u8 cmd_end_idx = cmd.raw.find(static_cast<char>(ControlCode::PacketEnd));
+        std::string correct_arg = cmd.raw.substr(3, cmd_end_idx - 3);
+        std::cout << cmd.raw << correct_arg << std::endl;
+        std::cout.flush();
+
+        ThreadID ttid = std::stoul(correct_arg, nullptr, 16);
+
         ThreadID* threadActionTarget = nullptr;
 
         char subcmd = cmd.cmd[1];

@@ -14,7 +14,7 @@
 class StubServer {
 public:
     StubServer(const u16 port) : _port(port), _running(false), _socket_server(-1) {};
-    ~StubServer() {
+    ~StubServer(void) {
         Stop();
     }
 

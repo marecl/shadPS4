@@ -6,6 +6,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <sys/user.h>
 
@@ -30,8 +31,10 @@ public:
     // Flow control
 
     bool ChildThreadHijack(ThreadID target);
-    void ChildThreadRegister(ThreadID target, int signal = SIGCONT);
-    bool ChildThreadContinue(ThreadID target, int signal = SIGCONT);
+    // Default signal for continuing is 0, SIGCONT doesn't really exist in GDB
+    void ChildThreadRegister(ThreadID target, int signal = 0);
+    bool ChildThreadContinue(ThreadID target, int signal = 0);
+    bool ChildThreadContinueGroup(ThreadID target, int signal = 0);
     ThreadID Wait(ThreadID target, int* status,
                   int options); ///< possibly split into __WALL, WSTOPPED
     u8 IsRunning(ThreadID target);
@@ -56,7 +59,7 @@ public:
      * Mark latest register dump as dirty, i.e. they weren't
      * dumped after changing target thread or continuing execution.
      */
-    void RegDumpInvalidate();
+    void RegDumpInvalidate(void);
     thread_state_t* FindThread(ThreadID target);
 
     // Misc, static pro publico bono
