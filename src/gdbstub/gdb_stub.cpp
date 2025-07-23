@@ -93,20 +93,31 @@ LoopAction Loop(std::string message, std::string& response) {
 // doesn't return anything to client
 s8 HandleContinuous(GdbCommand cmd) {
     char maincmd = cmd.cmd[0];
-    if (maincmd == 'c') {
+    if (maincmd == 'C') {
+        LOG_WARNING(Debug, "stub. basically 'c' with passing on a signal");
+    }
+    if (maincmd == 'c' || maincmd == 'C') {
         // TODO: throw out somewhere
-        LOG_WARNING(Debug, "stub. add SIG argument. don't continue if already running (or it will "
-                           "throw an error). ??maybe continuation address??");
+        LOG_WARNING(Debug, "?? continuation address ?? not implemented yet");
         ThreadID target = predator->thread_sel_flow;
 
         u8 sig = 0; // take from the argument
 
         LOG_ERROR(Debug, "GDB Continuing thread {}", target);
-        if (!predator->ChildThreadContinueGroup(target, sig)) {
-            LOG_ERROR(Debug, "GDB Can't continue thread {}", target);
-            return -1;
+        if (!predator->ChildThreadContinueAll(target, sig)) {
+            //LOG_ERROR(Debug, "GDB Can't continue thread {}", target);
+            //return -1;
         }
         return 1;
+    }
+
+    // this is the "running" half that returns nothing if main thread is running
+    if (maincmd == '?') {
+        thread_state_t* target = predator->FindThread(predator->_main_thread);
+        if (target == nullptr)
+            return -1;
+        // send nothing if running
+        return target->running ? 1 : 0;
     }
     return 0;
 }
@@ -114,8 +125,35 @@ s8 HandleContinuous(GdbCommand cmd) {
 std::string HandlePacket(GdbCommand cmd) {
     char maincmd = cmd.cmd[0];
 
+    if (maincmd == '?') {
+        LOG_WARNING(Debug, "stub, update stop reason signal,change to T ???and list threads??");
+        thread_state_t* target = predator->FindThread(predator->_main_thread);
+
+        // shouldn't happen lol
+        if (target == nullptr)
+            return E01;
+        // shouldn't happen lol
+        if (target->running)
+            return E01;
+
+            // in this case signal always means stop, so we can ignore possibility of SIGCONT
+        return std::format("T{:02}", target->signal);
+    }
     if (maincmd == 'D') {
         return touch_grass;
+    }
+
+    if (maincmd == 'T') {
+        u8 cmd_end_idx = cmd.raw.find(static_cast<char>(ControlCode::PacketEnd));
+        std::string correct_arg = cmd.raw.substr(2, cmd_end_idx - 2);
+        std::cout << cmd.raw << correct_arg << std::endl;
+        std::cout.flush();
+
+        ThreadID ttid = std::stoul(correct_arg, nullptr, 16);
+        if (thread_state_t* thread = predator->FindThread(ttid); thread != nullptr) {
+            return OK;
+        }
+        return "";
     }
 
     if (maincmd == '\03') {
@@ -123,20 +161,14 @@ std::string HandlePacket(GdbCommand cmd) {
         LOG_WARNING(Debug, "stub. confirm if interrupting an already stopped thread will cause "
                            "ptrace() to throw a fail (even though it's stopped)");
 
-        ThreadID target = predator->thread_sel_flow;
+        thread_state_t* target = predator->FindThread(predator->thread_sel_flow);
 
-        predator->ChildThreadInterrupt(target);
+        if (target == nullptr)
+            return E01;
 
-        return "T05";
-    }
+        predator->ChildThreadInterrupt(target->tid);
 
-    if (maincmd == '?') {
-        LOG_WARNING(Debug, "stub, update stop reason signal,change to T ???and list threads??");
-        // so...
-        // we need to lie and say the program is stopped
-        // otherwise gdb gets into a weird limbo state, what can only be resolved by yeeting it
-        // into oblivion shad works nice tho
-        return "T05";
+        return std::format("T{:02}", target->signal);
     }
 
     if (maincmd == 'm') {
@@ -153,12 +185,8 @@ std::string HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'g') {
+        // apparently regs must be ready by now
         ThreadID target = predator->thread_sel_reg_dump;
-
-        if (!predator->DumpRegs(target)) {
-            LOG_ERROR(Debug, "GDB Can't read registers of thread {}", target);
-            return E01;
-        }
         return PrintRegisters(&predator->user_regs, &predator->user_fpregs);
     }
 
@@ -185,11 +213,8 @@ std::string HandlePacket(GdbCommand cmd) {
     if (maincmd == 'H') {
         u8 cmd_end_idx = cmd.raw.find(static_cast<char>(ControlCode::PacketEnd));
         std::string correct_arg = cmd.raw.substr(3, cmd_end_idx - 3);
-        std::cout << cmd.raw << correct_arg << std::endl;
-        std::cout.flush();
 
         ThreadID ttid = std::stoul(correct_arg, nullptr, 16);
-
         ThreadID* threadActionTarget = nullptr;
 
         char subcmd = cmd.cmd[1];
@@ -216,7 +241,12 @@ std::string HandlePacket(GdbCommand cmd) {
                 LOG_ERROR(Debug, "GDB H[{}] requested nonexistent thread {}", subcmd, ttid);
                 return E01;
             }
-            predator->RegDumpInvalidate();
+
+            // GDB doesn't always call 'g' after changing target thread
+            if (subcmd == 'g') {
+                predator->DumpRegs(predator->thread_sel_reg_dump);
+            }
+
             return OK;
         }
         LOG_ERROR(Debug, "Cannot parse argument for H packet");

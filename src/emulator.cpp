@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <set>
+#include <iostream>
 #include <fmt/core.h>
 
 #include "common/config.h"

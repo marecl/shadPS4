@@ -42,15 +42,15 @@ int main(int argc, char* argv[]) {
 
         srv.Start();
 
+        if (!ct.ChildThreadHijack(target)) {
+            LOG_ERROR(Debug, "[-] Cannot seize thread {}", target);
+            return -1;
+        }
+
         int wait_pid_status{};
         ThreadID is_target = ct.Wait(target, &wait_pid_status, WSTOPPED);
         if (is_target != target && !child_thread_stopped(wait_pid_status)) {
             LOG_ERROR(Debug, "[!] Child didn't stop properly, doesn't exist or idk");
-            return -1;
-        }
-
-        if (!ct.ChildThreadHijack(target)) {
-            LOG_ERROR(Debug, "[-] Cannot seize thread {}", target);
             return -1;
         }
 
@@ -62,17 +62,12 @@ int main(int argc, char* argv[]) {
         // wants to track the app from the beginning
         sleep(1);
         if (!srv.ClientConnected()) {
+            LOG_ERROR(Debug, "GDB not connected");
             // if GDB is not connected, continue as normal
             if (!ct.ChildThreadContinue(target)) {
                 LOG_ERROR(Debug, "Cannot wake up child {}", target);
                 return -1;
             }
-        }
-
-        is_target = ct.Wait(target, &wait_pid_status, WSTOPPED);
-        if (is_target != target && !child_thread_stopped(wait_pid_status)) {
-            LOG_ERROR(Debug, "[!] Child didn't stop properly, doesn't exist or idk");
-            return -1;
         }
 
         // could link it directly to server, but let's keep it in case of getting '-' packet
@@ -90,12 +85,12 @@ int main(int argc, char* argv[]) {
                 case GdbStub::LoopAction::ERROR:
                     srv.SendMessage(GdbStub::MakeResponse(GdbStub::E01));
                     break;
-                case GdbStub::LoopAction::EXIT:
-                    kill(target, SIGTERM);
-                    break;
                 case GdbStub::LoopAction::BACK_TO_SENDER: ///< as-is
                     srv.SendMessage(msg);
                     break;
+                case GdbStub::LoopAction::EXIT:
+                    ptrace(PTRACE_DETACH, target, nullptr, nullptr);
+                    kill(target, SIGTERM);
                 case GdbStub::LoopAction::REPEAT: ///< Response is not modified
                 case GdbStub::LoopAction::SEND:   ///< Response is modified
                     srv.SendMessage(GdbStub::MakeResponse(response));
@@ -103,11 +98,6 @@ int main(int argc, char* argv[]) {
                 case GdbStub::LoopAction::NOSEND:
                     break;
                 }
-            }
-
-            if (ct.FindThread(target) == nullptr) {
-                LOG_INFO(Debug, "main exit lol");
-                do_continue_what_you_do = false;
             }
 
             int status = 0;
@@ -134,9 +124,10 @@ int main(int argc, char* argv[]) {
 
             int stop_reason = child_thread_stop_reason(status);
 
-            thread_state_t* thr = ct.FindThread(tid);
-            thr->running = false;
-            thr->signal = stop_reason;
+            if (thread_state_t* thr = ct.FindThread(tid); thr != nullptr) {
+                thr->running = (stop_reason == 0 || stop_reason == SIGCONT);
+                thr->signal = (stop_reason == SIGCONT) ? 0 : stop_reason;
+            }
 
             if (child_thread_sigtrap_is_syscall(status)) {
                 LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP", tid);
@@ -152,12 +143,12 @@ int main(int argc, char* argv[]) {
                     LOG_INFO(Debug, "[+] New thread/process: {}", new_tid);
 
                     // Child will sigstop on its own
-                    // ThreadID responder = ct.Wait(new_tid, nullptr, WSTOPPED);
+                    ThreadID responder = ct.Wait(new_tid, nullptr, WSTOPPED);
 
-                    ct.ChildThreadRegister(new_tid);
+                    ct.ChildThreadRegister(new_tid, SIGSTOP);
 
                     ct.ChildThreadContinue(tid);
-                    // ct.ChildThreadContinue(new_tid);
+                    ct.ChildThreadContinue(new_tid);
                     continue;
                 }
 
@@ -185,7 +176,13 @@ int main(int argc, char* argv[]) {
                 }
             } else if (stop_reason == SIGSTOP) {
                 LOG_INFO(Debug, "[*] Thread {} got SIGSTOP", tid);
-                ct.ChildThreadContinue(tid);
+                // Probably (yet) untraced child thread threw SIGSTOP faster than its
+                // parent raised SIGTRAP
+                // Jeździć, obserwować
+                thread_state_t* does_this_thread_exist = ct.FindThread(tid);
+                if (does_this_thread_exist != nullptr) {
+                    ct.ChildThreadContinue(tid);
+                }
             } else if (stop_reason == SIGCONT) {
                 LOG_INFO(Debug, "[*] Thread {} continuing", tid);
                 // ct.ChildThreadContinue(tid);

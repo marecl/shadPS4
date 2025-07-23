@@ -34,7 +34,7 @@ public:
     // Default signal for continuing is 0, SIGCONT doesn't really exist in GDB
     void ChildThreadRegister(ThreadID target, int signal = 0);
     bool ChildThreadContinue(ThreadID target, int signal = 0);
-    bool ChildThreadContinueGroup(ThreadID target, int signal = 0);
+    bool ChildThreadContinueAll(ThreadID target, int signal = 0);
     ThreadID Wait(ThreadID target, int* status,
                   int options); ///< possibly split into __WALL, WSTOPPED
     u8 IsRunning(ThreadID target);
