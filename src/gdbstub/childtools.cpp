@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iostream>
 #include <ranges>
 #include <string>
 #include <unordered_map>
@@ -54,15 +55,24 @@ void Predator::ChildThreadRegister(ThreadID target, int signal) {
     this->threads[target] = new_thread;
 }
 
-bool Predator::ChildThreadContinue(ThreadID target, int signal) {
+bool Predator::ChildThreadContinue(ThreadID target, int signal,
+                                   bool just_shut_the_fuck_up_about_the_segfaults_please) {
     this->RegDumpInvalidate();
 
-    LOG_ERROR(Debug, "[+--] Continuing child {}", target);
+    // this will throw a lot of lines into terminal
+    // only because (ask devs why the game throws segfaults)
+    // TODO: DON'T
+    if (!just_shut_the_fuck_up_about_the_segfaults_please)
+        LOG_ERROR(Debug, "[+--] Continuing child {}", target);
+
     thread_state_t* thread = this->FindThread(target);
 
     if (thread == nullptr) {
-        LOG_ERROR(Debug, "[!] Can't continue nonexistent child {}", target);
-        return false;
+        // Unknown thread, very possible that a child caught SIGSTOP before
+        // parent thread could raise an event
+        LOG_ERROR(Debug, "[!] Surprise motherfucker {}", target);
+        ptrace(PTRACE_CONT, target, NULL, signal);
+        return true;
     }
 
     if (!thread->running) {
@@ -74,14 +84,13 @@ bool Predator::ChildThreadContinue(ThreadID target, int signal) {
         LOG_ERROR(Debug, "[!] Continuing running child {}", target);
         return false;
     }
-
     thread->running = (signal == 0 || signal == SIGCONT);
     thread->signal = (signal == SIGCONT) ? 0 : signal;
 
     return true;
 }
 
-bool Predator::ChildThreadContinueAll(ThreadID target, int signal) {
+bool Predator::ChildThreadContinueAll(int signal) {
     this->RegDumpInvalidate();
 
     bool was_error = false;
@@ -89,7 +98,7 @@ bool Predator::ChildThreadContinueAll(ThreadID target, int signal) {
         LOG_ERROR(Debug, "[+++] Continuing child {}", tid);
 
         if (!state.running) {
-            if (ptrace(PTRACE_CONT, target, NULL, signal) == -1) {
+            if (ptrace(PTRACE_CONT, tid, NULL, signal) == -1) {
                 was_error = true;
                 LOG_ERROR(Debug, "[!] Can't continue child {} {}", tid, decerrno());
             }
@@ -123,93 +132,71 @@ u8 Predator::IsRunning(ThreadID target) {
  * Possibly do the same as with continue; Interrupt (single,unless main), InterruptAll
  */
 bool Predator::ChildThreadInterrupt(ThreadID target) {
-    if (target == -1) {
-        LOG_ERROR(Debug, "Unspecified thread for flow control. Assuming {}", this->_main_thread);
-        target = this->_main_thread;
-    }
-
-    // Assume the target is a singular thread
-    std::vector<ThreadID> target_threads{target};
-
-    if (target != this->_main_thread) {
-        LOG_INFO(Debug, "Stopping thread {}", target);
-        thread_state_t* thread_info = this->FindThread(target);
-        if (!thread_info->running) {
-            LOG_INFO(Debug, "Not stopping thread {} already stopped {}", target,
-                     thread_info->signal);
-            return true;
-        }
-        int ret = ptrace(PTRACE_INTERRUPT, target, NULL, 0);
-        if (ret == -1)
+    LOG_INFO(Debug, "Interrupting thread {}", target);
+    thread_state_t* thread_info = this->FindThread(target);
+    if (thread_info->running) {
+        if (int ret = ptrace(PTRACE_INTERRUPT, target, NULL, 0); ret == -1)
             LOG_ERROR(Debug, "[!] Can't interrupt child {} {}", target, decerrno());
-    } else {
-        // assumption was wrong, start over
-        LOG_INFO(Debug, "Stopping {} threads", this->threads.size());
-        target_threads.clear();
-        for (auto [tid, info] : this->threads) {
-            if (!info.running) {
-                LOG_INFO(Debug, "Not stopping thread {} already stopped {}", tid, info.signal);
-                continue;
-            }
-            if (ptrace(PTRACE_INTERRUPT, tid, NULL, 0) == -1)
-                LOG_ERROR(Debug, "[!] Can't interrupt child {} {}", tid, decerrno());
-            target_threads.push_back(tid);
-        }
+        return false;
     }
 
-    int status;
-    ThreadID waitpid_responder;
-    bool all_stopped = false;
+    thread_event_t evt = listener->Wait();
 
-    while (!all_stopped) {
-        all_stopped = target_threads.empty();
+    if (evt.tid != target) {
+        LOG_ERROR(Debug, "[!] Response from wrong thread {} != {}", target, evt.tid);
+        return false;
+    }
 
-        waitpid_responder = this->Wait(-1, &status, __WALL | WNOHANG);
-        if (waitpid_responder == 0) {
-            continue;
-        }
-        if (waitpid_responder == -1) {
-            LOG_ERROR(Debug, "Co do huja nawet nie wiem co to oznacza, nie da sie zaczekac na "
-                             "zjebany proces ktory mial sie przerwac");
-            break;
-        }
+    if (child_thread_exited(evt.status) || child_thread_killed(evt.status)) {
+        LOG_ERROR(Debug, "[!] Thread {} disappeared before interrupting", evt.tid);
+        return false;
+    }
 
-        if (child_thread_exited(status) || child_thread_killed(status)) {
-            LOG_ERROR(Debug, "[!] Thread {} exited or died before continuing", waitpid_responder);
-            if (int erased = std::erase(target_threads, waitpid_responder); erased != 1) {
-                LOG_ERROR(Debug, "One thread did something funky wunky {} {}", waitpid_responder,
-                          erased);
-            }
-            continue;
-        }
-
-        if (!child_thread_stopped(status))
-            continue;
-
-        if (int erased = std::erase(target_threads, waitpid_responder); erased != 1) {
-            LOG_ERROR(Debug, "One thread did something funky wunky {} {}", waitpid_responder,
-                      erased);
-            continue;
-        }
-
-        int stop_reason = child_thread_stop_reason(status);
-
-        if (stop_reason == (SIGTRAP | 0x80)) {
-            LOG_ERROR(Debug, "[*] Thread {} got SYSCALL SIGTRAP", waitpid_responder);
-        } else if (stop_reason == SIGTRAP) {
-            LOG_ERROR(Debug, "[*] Thread {} got SIGTRAP", waitpid_responder);
-        } else if (stop_reason == SIGSTOP) {
-            LOG_ERROR(Debug, "[*] Thread {} got SIGSTOP", waitpid_responder);
-        } else {
-            LOG_ERROR(Debug, "[*] Thread {} stopped with code {}", waitpid_responder, stop_reason);
-        }
-
-        // we are operating on a copy, so we need to find it again
-        thread_state_t* target_thread = this->FindThread(waitpid_responder);
-
+    if (child_thread_stopped(evt.status) && child_thread_stop_reason(evt.status) == SIGINT) {
+        LOG_INFO(Debug, "[!] Thread {} interrupted successfully", evt.tid);
+        thread_state_t* target_thread = this->FindThread(evt.tid);
         target_thread->running = false;
         target_thread->signal = SIGINT;
+        return true;
     }
+
+    return false;
+}
+
+bool Predator::ChildThreadInterruptAll(void) {
+    std::vector<ThreadID> target_threads{};
+
+    LOG_INFO(Debug, "Interrupting {} thread(s)", this->threads.size());
+    for (auto [tid, info] : this->threads) {
+        if (ptrace(PTRACE_INTERRUPT, tid, NULL, 0) == -1) {
+            LOG_ERROR(Debug, "[!] Can't interrupt child {} {}", tid, decerrno());
+            continue;
+        }
+        target_threads.push_back(tid);
+    }
+
+    thread_event_t evt{};
+    bool all_stopped = false;
+
+    while (!target_threads.empty()) {
+        if (!listener->Poll(evt))
+            continue;
+
+        if (child_thread_exited(evt.status) || child_thread_killed(evt.status)) {
+            LOG_ERROR(Debug, "[!] Thread {} disappeared before interrupting", evt.tid);
+        }
+
+        if (child_thread_stopped(evt.status) && child_thread_stop_reason(evt.status) == SIGSTOP) {
+            //LOG_INFO(Debug, "[!] Thread {} interrupted successfully", evt.tid);
+            thread_state_t* target_thread = this->FindThread(evt.tid);
+            target_thread->running = false;
+            target_thread->signal = SIGINT;
+        }
+        if (int erased = std::erase(target_threads, evt.tid); erased != 1) {
+            LOG_ERROR(Debug, "One thread did something funky wunky {} {}", evt.tid, erased);
+        }
+    }
+    LOG_INFO(Debug, "All threads interrupted");
 
     return true;
 }
@@ -217,7 +204,7 @@ bool Predator::ChildThreadInterrupt(ThreadID target) {
 bool Predator::ChildThreadRemove(ThreadID target) {
     // errors if no or multiple children are removed
     // shouldn't happen though
-    if (target == this->_main_thread) {
+    if (target == this->main_thread) {
         LOG_WARNING(Debug, "Main thread unregistered!");
         LOG_ERROR(Debug, "Consider killing the child");
     }
@@ -274,11 +261,11 @@ void Predator::ThreadRefresh(void) {
 
     if (!reg_dump_target_found && *reg_dump_target != -1) {
         LOG_ERROR(Debug, "Stub didn't notice disappearing thread {}", *reg_dump_target);
-        *reg_dump_target = this->_main_thread;
+        *reg_dump_target = this->main_thread;
     }
     if (!flow_ctrl_target_found && *flow_ctrl_target != -1) {
         LOG_ERROR(Debug, "Stub didn't notice disappearing thread {}", *flow_ctrl_target);
-        *flow_ctrl_target = this->_main_thread;
+        *flow_ctrl_target = this->main_thread;
     }
 }
 

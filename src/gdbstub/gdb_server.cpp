@@ -16,7 +16,7 @@ void StubServer::Start(void) {
 }
 
 void StubServer::Stop(void) {
-    if (!_running)
+    if (!_running.load())
         return;
 
     _running.store(false);

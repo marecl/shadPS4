@@ -20,6 +20,7 @@
 #include "gdbstub/childtools.h"
 #include "gdbstub/gdb_server.h"
 #include "gdbstub/gdb_stub.h"
+#include "gdbstub/ptrace_listener.h"
 #include "gdbstub/threadinfo.h"
 
 int main(int argc, char* argv[]) {
@@ -36,9 +37,11 @@ int main(int argc, char* argv[]) {
         Common::Log::Initialize();
         Common::Log::Start();
 
+        PtraceListener pl;
         StubServer srv(13377);
-        Predator ct(target);
+        Predator ct(target, &pl);
         Core::Devtools::GdbStub::predator = &ct;
+        Core::Devtools::GdbStub::listener = &pl;
 
         srv.Start();
 
@@ -47,13 +50,19 @@ int main(int argc, char* argv[]) {
             return -1;
         }
 
-        int wait_pid_status{};
-        ThreadID is_target = ct.Wait(target, &wait_pid_status, WSTOPPED);
-        if (is_target != target && !child_thread_stopped(wait_pid_status)) {
+        thread_event_t hijack_evt = pl.Wait();
+        if (!child_thread_stopped(hijack_evt.status) &&
+            child_thread_stop_reason(hijack_evt.status) != SIGSTOP) {
             LOG_ERROR(Debug, "[!] Child didn't stop properly, doesn't exist or idk");
             return -1;
         }
 
+        if (hijack_evt.tid != target) {
+            LOG_ERROR(Debug, "[!] Wrong child replied. Yeet");
+            return -1;
+        }
+
+        // At this point we're sure we're talking to the right child
         LOG_INFO(Debug, "[*] Thread {} seized", target);
         ct.ChildThreadRegister(target, SIGSTOP);
 
@@ -73,7 +82,8 @@ int main(int argc, char* argv[]) {
         // could link it directly to server, but let's keep it in case of getting '-' packet
         std::string response{};
         std::string msg{};
-        bool do_continue_what_you_do = true;
+        thread_event_t evt{};
+        bool do_continue_what_you_do{true};
 
         while (do_continue_what_you_do) {
             using namespace Core::Devtools;
@@ -89,8 +99,9 @@ int main(int argc, char* argv[]) {
                     srv.SendMessage(msg);
                     break;
                 case GdbStub::LoopAction::EXIT:
-                    ptrace(PTRACE_DETACH, target, nullptr, nullptr);
+                    ct.ChildThreadContinueAll();
                     kill(target, SIGTERM);
+                    do_continue_what_you_do = false;
                 case GdbStub::LoopAction::REPEAT: ///< Response is not modified
                 case GdbStub::LoopAction::SEND:   ///< Response is modified
                     srv.SendMessage(GdbStub::MakeResponse(response));
@@ -100,98 +111,96 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            int status = 0;
-            ThreadID tid = ct.Wait(-1, &status, __WALL | WNOHANG);
-            if (tid == 0) {
-                continue;
-            }
-            if (tid == -1) {
-                break;
-            }
-
-            if (child_thread_exited(status)) {
-                LOG_INFO(Debug, "[-] Thread {} exited with code {:02}", tid,
-                         child_thread_exit_reason(status));
-            }
-
-            if (child_thread_killed(status)) {
-                LOG_INFO(Debug, "[-] Thread {} was killed with {:02}", tid,
-                         child_thread_kill_reason(status));
-            }
-
-            if (!child_thread_stopped(status))
+            if (!pl.Poll(evt))
                 continue;
 
-            int stop_reason = child_thread_stop_reason(status);
+            if (child_thread_exited(evt.status)) {
+                LOG_INFO(Debug, "[-] Thread {} exited with code {:02}", evt.tid,
+                         child_thread_exit_reason(evt.status));
+                continue;
+            }
 
-            if (thread_state_t* thr = ct.FindThread(tid); thr != nullptr) {
+            if (child_thread_killed(evt.status)) {
+                LOG_INFO(Debug, "[-] Thread {} was killed with {:02}", evt.tid,
+                         child_thread_kill_reason(evt.status));
+                continue;
+            }
+
+            if (!child_thread_stopped(evt.status))
+                continue;
+
+            int stop_reason = child_thread_stop_reason(evt.status);
+
+            if (thread_state_t* thr = ct.FindThread(evt.tid); thr != nullptr) {
                 thr->running = (stop_reason == 0 || stop_reason == SIGCONT);
                 thr->signal = (stop_reason == SIGCONT) ? 0 : stop_reason;
             }
 
-            if (child_thread_sigtrap_is_syscall(status)) {
-                LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP", tid);
+            if (child_thread_sigtrap_is_syscall(evt.status)) {
+                LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP", evt.tid);
                 // ct.ChildThreadContinue(tid);
             }
 
             if (stop_reason == SIGTRAP) {
-                LOG_INFO(Debug, "[*] Thread {} got SIGTRAP", tid);
+                LOG_INFO(Debug, "[*] Thread {} got SIGTRAP", evt.tid);
 
-                if (child_thread_evt_clone(status)) {
+                if (child_thread_evt_clone(evt.status)) {
                     unsigned long new_tid = 0;
-                    ptrace(PTRACE_GETEVENTMSG, tid, nullptr, &new_tid);
+                    ptrace(PTRACE_GETEVENTMSG, evt.tid, nullptr, &new_tid);
                     LOG_INFO(Debug, "[+] New thread/process: {}", new_tid);
 
                     // Child will sigstop on its own
-                    ThreadID responder = ct.Wait(new_tid, nullptr, WSTOPPED);
+                    thread_event_t clone_evt = pl.Wait();
 
-                    ct.ChildThreadRegister(new_tid, SIGSTOP);
+                    ct.ChildThreadRegister(clone_evt.tid, SIGSTOP);
 
-                    ct.ChildThreadContinue(tid);
-                    ct.ChildThreadContinue(new_tid);
+                    ct.ChildThreadContinue(evt.tid);
+                    ct.ChildThreadContinue(clone_evt.tid);
                     continue;
                 }
 
-                if (child_thread_evt_exit(status)) {
-                    LOG_INFO(Debug, "[-] Thread {} exits with status {}", tid, status);
-                    ct.ChildThreadRemove(tid);
+                if (child_thread_evt_exit(evt.status)) {
+                    LOG_INFO(Debug, "[-] Thread {} exits with status {}", evt.tid, evt.status);
+                    ct.ChildThreadRemove(evt.tid);
                     continue;
                 }
                 // no other events, carry on
-                ct.ChildThreadContinue(tid);
+                ct.ChildThreadContinue(evt.tid);
 
             } else if (stop_reason == SIGSEGV) {
                 siginfo_t info;
-                if (ptrace(PTRACE_GETSIGINFO, tid, 0, &info) == 0) {
+                if (ptrace(PTRACE_GETSIGINFO, evt.tid, 0, &info) == 0) {
                     // Apparently we DO like this particular kind (Linux only?)
                     if (info.si_code == SEGV_ACCERR) {
-                        ct.ChildThreadContinue(tid, SIGSEGV);
+                        ct.ChildThreadContinue(evt.tid, SIGSEGV, true);
                     } else { // The rest is highly undesired
 
-                        ct.DumpRegs(tid);
-                        LOG_ERROR(
-                            Debug, "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)",
-                            tid, info.si_code, ct.user_regs.rip, ct.user_regs.rip - 0x7FF000000);
+                        ct.DumpRegs(evt.tid);
+                        LOG_ERROR(Debug,
+                                  "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)",
+                                  evt.tid, info.si_code, ct.user_regs.rip,
+                                  ct.user_regs.rip - 0x7FF000000);
                     }
                 }
             } else if (stop_reason == SIGSTOP) {
-                LOG_INFO(Debug, "[*] Thread {} got SIGSTOP", tid);
-                // Probably (yet) untraced child thread threw SIGSTOP faster than its
-                // parent raised SIGTRAP
-                // Jeździć, obserwować
-                thread_state_t* does_this_thread_exist = ct.FindThread(tid);
-                if (does_this_thread_exist != nullptr) {
-                    ct.ChildThreadContinue(tid);
+                LOG_INFO(Debug, "[*] Thread {} got SIGSTOP", evt.tid);
+
+                if (thread_state_t* _ = ct.FindThread(evt.tid); _ != nullptr) {
+                    ct.ChildThreadContinue(evt.tid);
+                } else {
+                    // *likely* a child that raised SIGSTOP faster than parent could emit an event
+                    pl.Place(evt);
                 }
+
             } else if (stop_reason == SIGCONT) {
-                LOG_INFO(Debug, "[*] Thread {} continuing", tid);
-                // ct.ChildThreadContinue(tid);
+                LOG_INFO(Debug, "[*] Thread {} continuing", evt.tid);
+                // ct.ChildThreadContinue(evt.tid);
             } else {
-                LOG_INFO(Debug, "[*] Thread {} stopped with signal {:02}", tid, stop_reason);
-                ct.ChildThreadContinue(tid);
+                LOG_INFO(Debug, "[*] Thread {} stopped with signal {:02}", evt.tid, stop_reason);
+                ct.ChildThreadContinue(evt.tid);
             }
 
-            // ct.ChildThreadContinue(tid);
+            // ct.ChildThreadContinue(evt.tid);
         }
 
         LOG_INFO(Debug, "Parent exited");

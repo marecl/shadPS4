@@ -18,11 +18,15 @@ public:
         Stop();
     }
 
+    // ...
     void Start(void);
+    // ...
     void Stop(void);
+    // ...
     bool ClientConnected(void);
-
+    // Pick up message from the queue
     bool GetMessage(std::string& out);
+    // Place a message on the outbound queue
     bool SendMessage(std::string in);
 
 private:

@@ -33,6 +33,7 @@ constexpr const char* E01 = "E01";
 constexpr const char* touch_grass = "UwU";
 
 Predator* predator = nullptr;
+PtraceListener* listener = nullptr;
 
 // -1 error, 0 don't send, 1 send
 LoopAction Loop(std::string message, std::string& response) {
@@ -103,17 +104,15 @@ s8 HandleContinuous(GdbCommand cmd) {
 
         u8 sig = 0; // take from the argument
 
-        LOG_ERROR(Debug, "GDB Continuing thread {}", target);
-        if (!predator->ChildThreadContinueAll(target, sig)) {
-            //LOG_ERROR(Debug, "GDB Can't continue thread {}", target);
-            //return -1;
+        if (target == predator->main_thread) {
+            return predator->ChildThreadContinueAll(sig) ? 1 : -1;
         }
-        return 1;
+        return predator->ChildThreadContinue(target, sig) ? 1 : -1;
     }
 
     // this is the "running" half that returns nothing if main thread is running
     if (maincmd == '?') {
-        thread_state_t* target = predator->FindThread(predator->_main_thread);
+        thread_state_t* target = predator->FindThread(predator->main_thread);
         if (target == nullptr)
             return -1;
         // send nothing if running
@@ -127,7 +126,7 @@ std::string HandlePacket(GdbCommand cmd) {
 
     if (maincmd == '?') {
         LOG_WARNING(Debug, "stub, update stop reason signal,change to T ???and list threads??");
-        thread_state_t* target = predator->FindThread(predator->_main_thread);
+        thread_state_t* target = predator->FindThread(predator->main_thread);
 
         // shouldn't happen lol
         if (target == nullptr)
@@ -136,7 +135,7 @@ std::string HandlePacket(GdbCommand cmd) {
         if (target->running)
             return E01;
 
-            // in this case signal always means stop, so we can ignore possibility of SIGCONT
+        // in this case signal always means stop, so we can ignore possibility of SIGCONT
         return std::format("T{:02}", target->signal);
     }
     if (maincmd == 'D') {
@@ -166,7 +165,10 @@ std::string HandlePacket(GdbCommand cmd) {
         if (target == nullptr)
             return E01;
 
-        predator->ChildThreadInterrupt(target->tid);
+        if (target->tid == predator->main_thread)
+            predator->ChildThreadInterruptAll();
+        else
+            predator->ChildThreadInterrupt(target->tid);
 
         return std::format("T{:02}", target->signal);
     }
@@ -228,7 +230,7 @@ std::string HandlePacket(GdbCommand cmd) {
 
         if (threadActionTarget != nullptr) {
             if (ttid == 0) {
-                *threadActionTarget = predator->_main_thread;
+                *threadActionTarget = predator->main_thread;
                 LOG_WARNING(Debug, "GDB H[{}] packet -> selected main thread ({})", subcmd,
                             *threadActionTarget);
             } else if (ttid == -1) {

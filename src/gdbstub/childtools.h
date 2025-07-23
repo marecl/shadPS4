@@ -11,6 +11,7 @@
 #include <sys/user.h>
 
 #include "common/types.h"
+#include "ptrace_listener.h"
 #include "threadinfo.h"
 
 enum SignalStop : int { STOP = SIGSTOP, INTERRUPT = SIGINT, TRAP = SIGTRAP };
@@ -23,9 +24,9 @@ typedef struct _thread_state_t {
 
 class Predator {
 public:
-    Predator(ThreadID main_thread)
-        : _main_thread(main_thread), thread_sel_flow(main_thread),
-          thread_sel_reg_dump(main_thread) {};
+    Predator(ThreadID main_thread, PtraceListener* listener)
+        : main_thread(main_thread), thread_sel_flow(main_thread), thread_sel_reg_dump(main_thread),
+          listener(listener) {};
     ~Predator() {};
 
     // Flow control
@@ -33,12 +34,13 @@ public:
     bool ChildThreadHijack(ThreadID target);
     // Default signal for continuing is 0, SIGCONT doesn't really exist in GDB
     void ChildThreadRegister(ThreadID target, int signal = 0);
-    bool ChildThreadContinue(ThreadID target, int signal = 0);
-    bool ChildThreadContinueAll(ThreadID target, int signal = 0);
+    bool ChildThreadContinue(ThreadID target, int signal = 0, bool just_shut_the_fuck_up_about_the_segfaults_please =false);
+    bool ChildThreadContinueAll(int signal = 0);
     ThreadID Wait(ThreadID target, int* status,
                   int options); ///< possibly split into __WALL, WSTOPPED
     u8 IsRunning(ThreadID target);
     bool ChildThreadInterrupt(ThreadID target);
+    bool ChildThreadInterruptAll(void);
     bool ChildThreadRemove(ThreadID target);
 
     // Metadata
@@ -71,9 +73,10 @@ public:
 
     // temporarily
     // private:
+    PtraceListener* listener;
     std::unordered_map<pid_t, thread_state_t> threads{}; ///< TID + name
 
-    const ThreadID _main_thread = -1;        ///< make this const at program startup??
+    const ThreadID main_thread = -1;         ///< make this const at program startup??
     ThreadID thread_sel_reg_dump = -1;       ///< selected for g-action
     ThreadID thread_sel_flow = -1;           ///< selected for s/c/t action
     bool user_regs_dirty{true};              ///< thread changed, true if regs weren't updated

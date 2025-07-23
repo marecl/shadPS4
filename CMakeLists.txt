@@ -652,6 +652,8 @@ set(DEV_TOOLS src/core/devtools/layer.cpp
               src/gdbstub/childtools.cpp
               src/gdbstub/stubtools.h
               src/gdbstub/stubtools.cpp
+              src/gdbstub/ptrace_listener.h
+              src/gdbstub/ptrace_listener.cpp
 )
 
 set(COMMON src/common/logging/backend.cpp

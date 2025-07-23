@@ -11,6 +11,7 @@
 
 #include "childtools.h"
 #include "common/types.h"
+#include "ptrace_listener.h"
 #include "threadinfo.h"
 
 namespace Core::Devtools {
@@ -22,6 +23,7 @@ extern const char* const E01;
 extern const char* const touch_grass;
 
 extern Predator* predator;
+extern PtraceListener* listener;
 
 enum class ControlCode : char {
     Ack = '+',
@@ -49,7 +51,6 @@ struct GdbCommand {
 LoopAction Loop(std::string message, std::string& response);
 s8 HandleContinuous(GdbCommand cmd);
 std::string HandlePacket(GdbCommand cmd);
-
 
 // printing for gdb
 std::string ThreadList(void);
