@@ -17,10 +17,14 @@
 
 #include "gdb_command.h"
 
+// Show received/sent data. It's a lot and may obfuscate the rest of the program
+// #define DEBUG_COMM
+
 class GdbStub {
 public:
     GdbStub(Predator* predator, PtraceListener* listener, StubServer* stub_server)
-        : predator(predator), listener(listener), stub_server(stub_server),client_connected(false) {};
+        : predator(predator), listener(listener), stub_server(stub_server),
+          client_connected(false) {};
     ~GdbStub() {};
 
     s8 LoopCommand(void);
@@ -41,9 +45,9 @@ private:
     void handle_packet_vCont(std::string arg);
 
     bool client_connected{};
-    Predator* predator;
-    PtraceListener* listener;
-    StubServer* stub_server;
+    Predator* predator{};
+    PtraceListener* listener{};
+    StubServer* stub_server{};
 };
 
 #endif // GDB_STUB_H

@@ -101,8 +101,8 @@ public:
     PtraceListener* listener;
     std::unordered_map<ThreadID, thread_state_t> threads{}; ///< TID + name
 
-    const ThreadID main_thread = -1;         ///< make this const at program startup??
-    ThreadID thread_sel_reg_dump = -1;       ///< selected for g-action
+    const ThreadID main_thread = -1;
+    ThreadID thread_sel_reg_dump = 0;        ///< selected for g-action
     ThreadID thread_sel_flow = -1;           ///< selected for s/c/t action
     bool user_regs_dirty{true};              ///< thread changed, true if regs weren't updated
     struct user_regs_struct user_regs{};     ///< latest thread regs dump

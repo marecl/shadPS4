@@ -21,9 +21,6 @@
 #include "stubtools.h"
 #include "threadinfo.h"
 
-// Show received/sent data. It's a lot and may obfuscate the rest of the program
-#define DEBUG_COMM
-
 constexpr const char* OK = "OK";
 constexpr const char* E01 = "E01";
 constexpr const char* TOUCH_GRASS = "UwU";
@@ -94,6 +91,7 @@ s8 GdbStub::LoopCommand(void) {
         std::string handler_effect = HandlePacket(cmd);
         if (handler_effect == TOUCH_GRASS) {
             this->SendMessage(OK);
+            this->predator->ChildThreadContinueAll();
             return 0;
         }
         if (handler_effect == DETACH) {
