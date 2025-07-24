@@ -11,7 +11,7 @@
 
 class StubServer {
 public:
-    StubServer(const int port) : _port(port), _running(false), _socket_server(-1) {};
+    StubServer(const int port) : _port(port), _running(false),_running_client(false), _socket_server(-1) {};
     ~StubServer(void) {
         Stop();
     }
@@ -27,17 +27,20 @@ public:
     // Place a message on the outbound queue
     bool SendMessage(std::string in);
 
+    void RestartSession(void);
+
 private:
     void Loop(void);
 
-    int _port;
-    std::atomic<bool> _running;
-    int _socket_server;
-    std::atomic<int> _socket_client;
-    std::thread _thread;
+    int _port{};
+    std::atomic<bool> _running{};
+    std::atomic<bool> _running_client{};
+    int _socket_server{};
+    std::atomic<int> _socket_client{};
+    std::thread _thread{};
 
-    std::mutex _inbound_queue_mutex;
-    std::queue<std::string> _inbound_queue;
+    std::mutex _inbound_queue_mutex{};
+    std::queue<std::string> _inbound_queue{};
 };
 
 #endif // GDBSTUB_SERVER_H

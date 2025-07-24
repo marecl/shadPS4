@@ -21,9 +21,13 @@
 #include "stubtools.h"
 #include "threadinfo.h"
 
+// Show received/sent data. It's a lot and may obfuscate the rest of the program
+#define DEBUG_COMM
+
 constexpr const char* OK = "OK";
 constexpr const char* E01 = "E01";
 constexpr const char* TOUCH_GRASS = "UwU";
+constexpr const char* DETACH = "OwO";
 
 // -2 error (yeet), -1 error (continue execution), 0 exit, 1 continue execution
 s8 GdbStub::LoopCommand(void) {
@@ -36,6 +40,13 @@ s8 GdbStub::LoopCommand(void) {
     if (!this->stub_server->GetMessage(message))
         return 1;
 
+    // Catch the first connection from GDB
+    if (!this->client_connected) {
+        LOG_INFO(Debug, "Received a connection from GDB. Interrupting all threads...");
+        this->predator->ChildThreadInterruptAll();
+        this->client_connected = true;
+    }
+
     s8 preprocess_status = Preprocess(message);
 
     if (preprocess_status == -1) {
@@ -43,6 +54,7 @@ s8 GdbStub::LoopCommand(void) {
         this->SendMessage(E01);
         return -1;
     }
+
     if (preprocess_status == 0) {
         // '+' packet, ACK
         this->SendMessage(message, true);
@@ -50,6 +62,7 @@ s8 GdbStub::LoopCommand(void) {
     }
     if (preprocess_status == 2) {
         // '-' packet, repeat last response
+        LOG_WARNING(Debug, "Client requested last response: < {} >", response);
         this->SendMessage(response);
         return 1;
     }
@@ -61,8 +74,9 @@ s8 GdbStub::LoopCommand(void) {
     }
 
     GdbCommand cmd = ParsePacket(message);
+#ifdef DEBUG_COMM
     LOG_INFO(Debug, "Received data:\n\tRAW: {}\n\tCMD: {}\n\tARG: {}", cmd.raw, cmd.cmd, cmd.arg);
-
+#endif
     s8 open_ended_handler_status = HandleContinuous(cmd);
 
     if (open_ended_handler_status == -1) {
@@ -79,9 +93,16 @@ s8 GdbStub::LoopCommand(void) {
     if (open_ended_handler_status == 0) {
         std::string handler_effect = HandlePacket(cmd);
         if (handler_effect == TOUCH_GRASS) {
-            LOG_INFO(Debug, "Exit requested", response);
             this->SendMessage(OK);
             return 0;
+        }
+        if (handler_effect == DETACH) {
+            this->SendMessage(OK);
+            this->stub_server->RestartSession();
+            this->client_connected = false;
+            LOG_INFO(Debug, "Client GDB detached itself. Continuing execution...");
+            this->predator->ChildThreadContinueAll();
+            return 1;
         }
 
         response = handler_effect;
@@ -105,9 +126,9 @@ bool GdbStub::LoopTrace(void) {
 
         std::string thread_exit_notification =
             std::format("W{:02x};process:{:x};", child_thread_exit_reason(evt.status), evt.tid);
-
         if (!this->SendMessage(thread_exit_notification))
             predator->ChildThreadContinue(evt.tid);
+
         return 1;
     }
 
@@ -115,6 +136,7 @@ bool GdbStub::LoopTrace(void) {
         LOG_ERROR(Debug, "stub");
         LOG_INFO(Debug, "[__] Thread {} was killed with {:02}", evt.tid,
                  child_thread_kill_reason(evt.status));
+        // There's no packet to signal thread being *killed*
         return 1;
     }
 
@@ -146,17 +168,16 @@ bool GdbStub::LoopTrace(void) {
             return 1;
         }
 
-        // std::string thread_stop_sigstop_notification =
-        //     std::format("T{:02x}thread:{:x}", stop_reason, evt.tid);
-        // if (!this->SendMessage(thread_stop_sigstop_notification))
-        //     predator->ChildThreadContinue(evt.tid);
+        std::string thread_stop_sigstop_notification =
+            std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
+        if (!this->SendMessage(thread_stop_sigstop_notification))
+            predator->ChildThreadContinue(evt.tid);
         return 1;
     }
 
     if (stop_reason == SIGCONT) {
         // Shouldn't happen anyway
         LOG_INFO(Debug, "[**] Thread {} continuing", evt.tid);
-        // predator.ChildThreadContinue(evt.tid);
         return 1;
     }
 
@@ -230,7 +251,7 @@ bool GdbStub::LoopTrace(void) {
 
     LOG_INFO(Debug, "[*] Thread {} stopped with signal {:02}", evt.tid, stop_reason);
     std::string thread_stop_other_notification =
-        std::format("T{:02x}thread:{:x}", stop_reason, evt.tid);
+        std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
     if (!this->SendMessage(thread_stop_other_notification))
         this->predator->ChildThreadContinue(evt.tid);
 
@@ -265,15 +286,6 @@ s8 GdbStub::HandleContinuous(GdbCommand cmd) {
         return 1;
     }*/
 
-    // this is the "running" half that returns nothing if main thread is running
-    if (maincmd == '?') {
-        thread_state_t* target = this->predator->FindThread(0);
-        if (target == nullptr)
-            return -1;
-        // send nothing if running
-        return target->running ? 1 : 0;
-    }
-
     if (cmd.cmd == "vCont") {
         handle_packet_vCont(cmd.arg);
         return 1;
@@ -286,20 +298,27 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
     char maincmd = cmd.cmd[0];
 
     if (maincmd == '?') {
+        // this is the "running" half that returns nothing if main thread is running
         LOG_WARNING(Debug, "stub, update stop reason signal,change to T ???and list threads??");
         thread_state_t* target = this->predator->FindThread(0);
 
         // shouldn't happen lol
         if (target == nullptr)
             return E01;
-        // shouldn't happen lol
-        if (target->running)
+
+        if (target->running) {
+            LOG_ERROR(Debug, "Child threads didn't stop on GDB attach");
             return E01;
+        }
 
         // in this case signal always means stop, so we can ignore possibility of SIGCONT
         return std::format("T{:02x}", target->signal);
     }
     if (maincmd == 'D') {
+        return DETACH;
+    }
+
+    if (maincmd == 'k') {
         return TOUCH_GRASS;
     }
 
@@ -441,7 +460,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             return std::format("QC{:x}", this->predator->GetTargetRegDump());
         }
         if (cmd.cmd == "qAttached") {
-            return "1";
+            return this->client_connected ? "1" : "0";
         }
         if (cmd.cmd == "qSupported") {
             //  - probably necessary in the near future
@@ -474,7 +493,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         }
     }
     LOG_ERROR(Debug, "Not implemented: {}", cmd.cmd);
-    return E01;
+    return "";
 }
 
 void GdbStub::End(int code) {
@@ -582,14 +601,20 @@ bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) 
 }
 
 bool GdbStub::SendMessage(std::string message, bool raw_and_mute) {
-    if (!this->stub_server->ClientConnected())
+    if (!this->client_connected)
         return false;
 
     if (!raw_and_mute) {
+#ifdef DEBUG_COMM
         LOG_INFO(Debug, "Sending:\n\tRES: {}", message);
+#endif
         message = MakeResponse(message);
     }
-    return this->stub_server->SendMessage(message);
+
+    bool send_successful = this->stub_server->SendMessage(message);
+    if (!send_successful)
+        LOG_ERROR(Debug, "Client disconnected without detaching!");
+    return send_successful;
 }
 
 void GdbStub::handle_packet_vCont(std::string arg) {
@@ -615,8 +640,6 @@ void GdbStub::handle_packet_vCont(std::string arg) {
         if (sep_idx != std::string::npos) {
             target = std::strtol(combination.substr(sep_idx + 1).c_str(), nullptr, 16);
         }
-        std::cout << action << '\t' << signal << '\t' << std::hex << target << std::dec
-                  << std::endl;
 
         thread_state_t* target_thread = this->predator->FindThread(target);
 

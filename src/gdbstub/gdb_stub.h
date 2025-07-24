@@ -20,7 +20,7 @@
 class GdbStub {
 public:
     GdbStub(Predator* predator, PtraceListener* listener, StubServer* stub_server)
-        : predator(predator), listener(listener), stub_server(stub_server) {};
+        : predator(predator), listener(listener), stub_server(stub_server),client_connected(false) {};
     ~GdbStub() {};
 
     s8 LoopCommand(void);
@@ -40,6 +40,7 @@ private:
     bool SendMessage(std::string message, bool raw_and_mute = false);
     void handle_packet_vCont(std::string arg);
 
+    bool client_connected{};
     Predator* predator;
     PtraceListener* listener;
     StubServer* stub_server;

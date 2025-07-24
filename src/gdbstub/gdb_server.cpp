@@ -54,6 +54,13 @@ bool StubServer::SendMessage(std::string in) {
     return true;
 }
 
+void StubServer::RestartSession(void) {
+    _running_client.store(false);
+    shutdown(this->_socket_client.load(), SHUT_RDWR);
+    std::lock_guard<std::mutex> lock(_inbound_queue_mutex);
+    this->_inbound_queue = {};
+}
+
 void StubServer::Loop(void) {
     pthread_setname_np(pthread_self(), "GDB Listener");
 
@@ -83,7 +90,7 @@ void StubServer::Loop(void) {
 
     std::cout << "[*] GDB Server listening on port: " << _port << std::endl;
 
-    while (_running) {
+    while (_running.load()) {
         sockaddr_in client_addr{};
         socklen_t len = sizeof(client_addr);
         int client = accept(_socket_server, reinterpret_cast<sockaddr*>(&client_addr), &len);
@@ -95,10 +102,11 @@ void StubServer::Loop(void) {
         }
 
         _socket_client.store(client);
+        _running_client.store(true);
 
         char inboundBuffer[1024] = {0};
 
-        while (_running) {
+        while (_running_client.load()) {
             ssize_t bytes = read(_socket_client.load(), inboundBuffer, sizeof(inboundBuffer) - 1);
             if (bytes > 0) {
                 std::lock_guard<std::mutex> lock(_inbound_queue_mutex);

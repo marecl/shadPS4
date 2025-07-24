@@ -93,9 +93,8 @@ int main(int argc, char* argv[]) {
             s8 stub_status_loop_command = stub.LoopCommand();
 
             if (stub_status_loop_command == 0) {
+                LOG_INFO(Debug, "Exit requested");
                 do_continue_what_you_do = false;
-                LOG_ERROR(Debug, "Terminate child here");
-                // exit(0);
             } else if (stub_status_loop_command == -1) {
                 LOG_ERROR(Debug, "Stub recoverable error");
 
