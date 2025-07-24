@@ -38,6 +38,7 @@ public:
     bool ChildThreadContinueAll(int signal = 0);
     bool ChildThreadInterrupt(ThreadID target);
     bool ChildThreadInterruptAll(void);
+
     /**
      * Tracker, no interaction with threads
      */
@@ -67,6 +68,22 @@ public:
      * dumped after changing target thread or continuing execution.
      */
     void RegDumpInvalidate(void);
+
+    ThreadID GetTargetRegDump(void) {
+        if (this->thread_sel_reg_dump == -1)
+            return this->main_thread;
+        if (this->thread_sel_reg_dump == 0)
+            return this->main_thread;
+        return this->thread_sel_reg_dump;
+    }
+    ThreadID GetTargetFlowControl(void) {
+        if (this->thread_sel_flow == -1)
+            return -1;
+        if (this->thread_sel_flow == 0)
+            return this->main_thread;
+        return this->thread_sel_flow;
+    }
+
     /**
      * Find thread state. 0 for main.
      */

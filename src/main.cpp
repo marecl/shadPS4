@@ -109,7 +109,7 @@ int main(int argc, char* argv[]) {
                 continue;
         }
 
-        ptrace(PTRACE_DETACH, child_pid, nullptr, nullptr);
+        kill(child_pid, SIGTERM);
         stub.End(0);
         stub_server.Stop();
 
@@ -117,7 +117,6 @@ int main(int argc, char* argv[]) {
         ///< plz make it stop properly im tired of trying to interrupt it
 
         std::cout << "Parent exited\n";
-        return 0;
     } else { ///< if (child_pid > 0)
         std::cout << "Fork error\n";
     }

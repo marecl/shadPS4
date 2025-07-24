@@ -131,7 +131,10 @@ bool Predator::ChildThreadInterrupt(ThreadID target) {
         return false;
     }
 
-    thread_event_t evt = listener->Wait();
+    thread_event_t evt{};
+    // Single interrupt might be way faster to catch
+    if (!listener->Poll(evt))
+        evt = listener->Wait();
 
     if (evt.tid != target) {
         LOG_ERROR(Debug, "[!] Response from wrong thread {} != {}", target, evt.tid);
@@ -266,11 +269,14 @@ void Predator::RegDumpInvalidate(void) {
     this->user_regs_dirty = true;
 }
 
+/// @brief Find thread ID in tracked threads
+/// @param target ThreadID
+/// @return main thread for 0 and -1, target for any other. or nullptr if not found
 thread_state_t* Predator::FindThread(ThreadID target) {
-    if (target == 0)
+    if (target == 0 || target == -1)
         target = this->main_thread;
+    // search every time because it *may* disappear
     auto target_found = this->threads.find(target);
-
     return target_found == this->threads.end() ? nullptr : &target_found->second;
 }
 

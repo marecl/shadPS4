@@ -20,7 +20,10 @@ s8 Preprocess(std::string& data) {
 
     switch (cc) {
     case static_cast<char>(ControlCode::Ack):
-        return 0;
+        if (data.length() == 1)
+            return 0;
+        data = data.substr(1);
+        return 1;
     case static_cast<char>(ControlCode::Interrupt):
         return 1;
     case static_cast<char>(ControlCode::Nack):

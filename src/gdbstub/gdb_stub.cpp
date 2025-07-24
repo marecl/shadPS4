@@ -17,6 +17,7 @@
 #include "common/logging/backend.h"
 #include "common/logging/log.h"
 #include "gdb_stub.h"
+#include "src/core/memory.h"
 #include "stubtools.h"
 #include "threadinfo.h"
 
@@ -266,7 +267,7 @@ s8 GdbStub::HandleContinuous(GdbCommand cmd) {
 
     // this is the "running" half that returns nothing if main thread is running
     if (maincmd == '?') {
-        thread_state_t* target = this->predator->FindThread(predator->main_thread);
+        thread_state_t* target = this->predator->FindThread(0);
         if (target == nullptr)
             return -1;
         // send nothing if running
@@ -286,7 +287,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
 
     if (maincmd == '?') {
         LOG_WARNING(Debug, "stub, update stop reason signal,change to T ???and list threads??");
-        thread_state_t* target = this->predator->FindThread(this->predator->main_thread);
+        thread_state_t* target = this->predator->FindThread(0);
 
         // shouldn't happen lol
         if (target == nullptr)
@@ -320,21 +321,19 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         LOG_WARNING(Debug, "stub. confirm if interrupting an already stopped thread will cause "
                            "ptrace() to throw a fail (even though it's stopped)");
 
-        ThreadID target = predator->thread_sel_flow;
+        ThreadID target = this->predator->GetTargetFlowControl();
+        // reminder: 0 for main, -1 is all (caught as main), specific for specific
+        thread_state_t* target_thread = this->predator->FindThread(target);
 
-        if (target == -1)
+        if (target == -1) {
             predator->ChildThreadInterruptAll();
-        if (target == 0)
-            predator->ChildThreadInterrupt(predator->main_thread);
-
-        thread_state_t* specified_target = this->predator->FindThread(predator->thread_sel_flow);
-
-        if (specified_target == nullptr)
+        } else if (target_thread == nullptr) {
             return E01;
+        } else {
+            predator->ChildThreadInterrupt(target_thread->tid);
+        }
 
-        predator->ChildThreadInterrupt(specified_target->tid);
-
-        return std::format("T{:02x}", specified_target->signal);
+        return std::format("T{:02x}thread:{:x};", target_thread->signal, target_thread->tid);
     }
 
     if (maincmd == 'm') {
@@ -352,16 +351,12 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
 
     if (maincmd == 'g') {
         // apparently regs must be ready by now
-        ThreadID target = this->predator->thread_sel_reg_dump;
         return PrintRegisters(&this->predator->user_regs, &this->predator->user_fpregs);
     }
 
     if (maincmd == 'p') {
         if (this->predator->user_regs_dirty) {
-            // didn't send Hg packet to switch threads
-            // or (idk) ran the target (TODO)
-            LOG_ERROR(Debug, "GDB didn't refresh registers after changing target/running thread");
-            return "xxxxxxxxxxxxxxxx";
+            this->predator->DumpRegs(this->predator->GetTargetRegDump());
         }
         u16 targetReg = std::stol(cmd.arg, nullptr, 16);
 
@@ -410,7 +405,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
 
             // GDB doesn't always call 'g' after changing target thread
             if (subcmd == 'g') {
-                this->predator->DumpRegs(predator->thread_sel_reg_dump);
+                this->predator->DumpRegs(this->predator->GetTargetRegDump());
             }
 
             return OK;
@@ -443,7 +438,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         }
         if (cmd.cmd == "qC") {
             // target disputable, works for now
-            return std::format("QC{:x}", this->predator->thread_sel_reg_dump);
+            return std::format("QC{:x}", this->predator->GetTargetRegDump());
         }
         if (cmd.cmd == "qAttached") {
             return "1";
@@ -452,7 +447,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             //  - probably necessary in the near future
             // binary-upload+ - unnecessary for now, maybe ever
             std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+;QThreadEvents+;"
-                               "vContSupported+;QThreadEvents+;vCont+";
+                               "vContSupported+;vCont+";
             // just in case i'm far enough to need breakpoints
             if (resp.find("swbreak+"))
                 resp += ";swbreak+";
@@ -573,10 +568,10 @@ std::string GdbStub::PrintRegisters(const struct user_regs_struct* regs,
 }
 
 bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) {
-    // const auto mem = Memory::Instance();
+    //    const auto mem = Core::Memory::Instance();
 
-    // if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
-    //     return false;
+    //  if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
+    //      return false;
     // }
 
     for (u64 i = 0; i < length; ++i) {
@@ -623,13 +618,15 @@ void GdbStub::handle_packet_vCont(std::string arg) {
         std::cout << action << '\t' << signal << '\t' << std::hex << target << std::dec
                   << std::endl;
 
+        thread_state_t* target_thread = this->predator->FindThread(target);
+
         switch (action) {
         case 'C': ///< Supplies its own code
         case 'c': ///< No code (default: 0)
-            if (target != 0)
-                predator->ChildThreadContinue(target, signal);
-            else
+            if (target == 0)
                 predator->ChildThreadContinueAll(signal);
+            else
+                predator->ChildThreadContinue(target, signal);
             break;
         }
     }
