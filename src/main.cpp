@@ -28,9 +28,10 @@ int main(int argc, char* argv[]) {
     ThreadID child_pid = fork();
 
     if (child_pid == 0) {
+        prctl(PR_SET_PDEATHSIG, SIGTERM);
         auto ret = MainReal(argc, argv);
         std::cout << "Child exited\n";
-        return ret;
+        exit(ret);
 
     } else if (child_pid > 0) {
         prctl(PR_SET_NAME, "shaddebug", 0, 0);
@@ -108,13 +109,15 @@ int main(int argc, char* argv[]) {
                 continue;
         }
 
-       // ptrace(PTRACE_DETACH, child_pid, nullptr, SIGINT);
-        // change 0 to a variable returned by parent (or a child if ended with an error)
-        // but idk
-        // stub.End(0);
-        // ptrace_listener.Stop(); // this fucker can't get a hint to exit waitpid()
+        ptrace(PTRACE_DETACH, child_pid, nullptr, nullptr);
+        stub.End(0);
         stub_server.Stop();
+
+        // ptrace_listener.Stop(); ///< this fucker can't get a hint to exit waitpid()
+        ///< plz make it stop properly im tired of trying to interrupt it
+
         std::cout << "Parent exited\n";
+        return 0;
     } else { ///< if (child_pid > 0)
         std::cout << "Fork error\n";
     }
