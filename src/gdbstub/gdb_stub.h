@@ -22,7 +22,6 @@ public:
     GdbStub(Predator* predator, PtraceListener* listener, StubServer* stub_server)
         : predator(predator), listener(listener), stub_server(stub_server) {};
     ~GdbStub() {};
-    void End(u8 code);
 
     s8 LoopCommand(void);
     bool LoopTrace(void);
@@ -34,13 +33,12 @@ public:
     std::string PrintRegisters(const struct user_regs_struct* regs,
                                const struct user_fpregs_struct* fpregs);
     bool ReadMemory(const u64 address, const u64 length, std::string* out);
-
-    // pretty generic if you asked me
-    // just get rid of those control characters, jeez
+    // ...
+    void End(int code);
 
 private:
-    bool SendMessage(std::string message, bool raw = false);
-
+    bool SendMessage(std::string message, bool raw_and_mute = false);
+    void handle_packet_vCont(std::string arg);
 
     Predator* predator;
     PtraceListener* listener;

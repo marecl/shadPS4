@@ -41,17 +41,19 @@ static std::string decerrno(void) {
 
 // remember to Wait()!!!
 // we assume thread is stopped on a SIGTRAP/SIGSTOP already (new child)
-bool Predator::ChildThreadHijack(ThreadID target) {
+bool Predator::HijackChild(ThreadID target) {
     return -1 != ptrace(PTRACE_SEIZE, target, NULL,
                         PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD);
 }
 
-void Predator::ChildThreadRegister(ThreadID target, int signal) {
+void Predator::ThreadRegister(ThreadID target, int signal) {
     thread_state_t new_thread = {.tid = target,
                                  .name = std::format("Thr{}", target), ///< Temporary name
+                                 .running = false, ///< Doesn't matter, will be updated soon
                                  .signal = signal};
-    new_thread.running = (signal == 0 || signal == SIGCONT);
+
     new_thread.name.reserve(20);
+    UpdateRunningState(new_thread, signal);
     this->threads[target] = new_thread;
 }
 
@@ -63,7 +65,7 @@ bool Predator::ChildThreadContinue(ThreadID target, int signal,
     // only because (ask devs why the game throws segfaults)
     // TODO: DON'T
     if (!just_shut_the_fuck_up_about_the_segfaults_please)
-        LOG_ERROR(Debug, "[+--] Continuing child {}", target);
+        LOG_ERROR(Debug, "[+--] Continuing thread {} with signal {}", target, signal);
 
     thread_state_t* thread = this->FindThread(target);
 
@@ -84,8 +86,7 @@ bool Predator::ChildThreadContinue(ThreadID target, int signal,
         LOG_ERROR(Debug, "[!] Continuing running child {}", target);
         return false;
     }
-    thread->running = (signal == 0 || signal == SIGCONT);
-    thread->signal = (signal == SIGCONT) ? 0 : signal;
+    UpdateRunningState(*thread, signal);
 
     return true;
 }
@@ -94,6 +95,7 @@ bool Predator::ChildThreadContinueAll(int signal) {
     this->RegDumpInvalidate();
 
     bool was_error = false;
+    LOG_ERROR(Debug, "[+--] Continuing all threads with signal {}", signal);
     for (auto& [tid, state] : this->threads) {
         // LOG_ERROR(Debug, "[+++] Continuing child {}", tid);
 
@@ -106,17 +108,10 @@ bool Predator::ChildThreadContinueAll(int signal) {
             was_error = true;
             LOG_ERROR(Debug, "[!] Continuing running child {}", tid);
         }
-
-        state.running = (signal == 0 || signal == SIGCONT);
-        state.signal = (signal == SIGCONT) ? 0 : signal;
+        UpdateRunningState(state, signal);
     }
 
     return !was_error;
-}
-
-ThreadID Predator::Wait(ThreadID target, int* status, int options) {
-    ThreadID receiver = waitpid(target, status, options);
-    return receiver;
 }
 
 u8 Predator::IsRunning(ThreadID target) {
@@ -151,8 +146,7 @@ bool Predator::ChildThreadInterrupt(ThreadID target) {
     if (child_thread_stopped(evt.status) && child_thread_stop_reason(evt.status) == SIGSTOP) {
         LOG_INFO(Debug, "[!] Thread {} interrupted successfully", evt.tid);
         thread_state_t* target_thread = this->FindThread(evt.tid);
-        target_thread->running = false;
-        target_thread->signal = SIGINT;
+        this->UpdateRunningState(*target_thread, SIGINT);
         return true;
     }
 
@@ -198,7 +192,7 @@ bool Predator::ChildThreadInterruptAll(void) {
     return true;
 }
 
-bool Predator::ChildThreadRemove(ThreadID target) {
+bool Predator::ThreadRemove(ThreadID target) {
     // errors if no or multiple children are removed
     // shouldn't happen though
     if (target == 0) {
@@ -245,6 +239,7 @@ std::string Predator::ThreadName(ThreadID target) {
 void Predator::ThreadRefresh(void) {
     ThreadID* reg_dump_target = &this->thread_sel_reg_dump;
     ThreadID* flow_ctrl_target = &this->thread_sel_flow;
+
     bool reg_dump_target_found = false;
     bool flow_ctrl_target_found = false;
     for (auto& [tid, info] : this->threads) {
@@ -257,13 +252,13 @@ void Predator::ThreadRefresh(void) {
             flow_ctrl_target_found = true;
     }
 
-    if (!reg_dump_target_found && *reg_dump_target != -1) {
+    if (!reg_dump_target_found && *reg_dump_target != 0) {
         LOG_ERROR(Debug, "Stub didn't notice disappearing thread {}", *reg_dump_target);
         *reg_dump_target = this->main_thread;
     }
     if (!flow_ctrl_target_found && *flow_ctrl_target != -1) {
         LOG_ERROR(Debug, "Stub didn't notice disappearing thread {}", *flow_ctrl_target);
-        *flow_ctrl_target = this->main_thread;
+        *flow_ctrl_target = -1;
     }
 }
 

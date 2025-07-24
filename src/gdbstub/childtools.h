@@ -14,7 +14,6 @@
 #include "ptrace_listener.h"
 #include "threadinfo.h"
 
-enum SignalStop : int { STOP = SIGSTOP, INTERRUPT = SIGINT, TRAP = SIGTRAP };
 typedef struct _thread_state_t {
     ThreadID tid = -1;
     std::string name{};
@@ -22,43 +21,35 @@ typedef struct _thread_state_t {
     int signal{0};
 } thread_state_t;
 
-enum ChildAction {
-    EXIT,
-    KILL,
-    STOP_STOP,
-    STOP_SIGSEGV,
-    STOP_SIGTRAP,
-    STOP_SIGSTOP,
-    STOP_EVT_CLONE,
-    STOP_EVT_EXIT
-};
-
 class Predator {
 public:
     Predator(ThreadID main_thread, PtraceListener* listener)
-        : main_thread(main_thread), thread_sel_flow(main_thread), thread_sel_reg_dump(main_thread),
+        : main_thread(main_thread), thread_sel_flow(-1), thread_sel_reg_dump(main_thread),
           listener(listener) {};
     ~Predator() {};
 
     // Flow control
-    bool ChildThreadHijack(ThreadID target);
+    bool HijackChild(ThreadID target);
+    u8 IsRunning(ThreadID target);
+
     // Default signal for continuing is 0, SIGCONT doesn't really exist in GDB
-    void ChildThreadRegister(ThreadID target, int signal = 0);
     bool ChildThreadContinue(ThreadID target, int signal = 0,
                              bool just_shut_the_fuck_up_about_the_segfaults_please = false);
     bool ChildThreadContinueAll(int signal = 0);
-    ThreadID Wait(ThreadID target, int* status,
-                  int options); ///< possibly split into __WALL, WSTOPPED
-    u8 IsRunning(ThreadID target);
     bool ChildThreadInterrupt(ThreadID target);
     bool ChildThreadInterruptAll(void);
     /**
-     * Remove thread from tracked list. 0 for main
+     * Tracker, no interaction with threads
      */
-    bool ChildThreadRemove(ThreadID target);
+    void ThreadRegister(ThreadID target, int signal = 0);
+    bool ThreadRemove(ThreadID target);
 
     // Metadata
-
+    static bool UpdateRunningState(thread_state_t& target, int signal) {
+        target.running = (signal == 0 || signal == SIGCONT);
+        target.signal = (signal == SIGCONT) ? 0 : signal;
+        return target.running;
+    }
     /**
      * Dump registers from (hopefully) stopped thread.
      */
@@ -91,7 +82,7 @@ public:
     // temporarily
     // private:
     PtraceListener* listener;
-    std::unordered_map<pid_t, thread_state_t> threads{}; ///< TID + name
+    std::unordered_map<ThreadID, thread_state_t> threads{}; ///< TID + name
 
     const ThreadID main_thread = -1;         ///< make this const at program startup??
     ThreadID thread_sel_reg_dump = -1;       ///< selected for g-action

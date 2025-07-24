@@ -38,15 +38,14 @@ int main(int argc, char* argv[]) {
         Common::Log::Initialize();
         Common::Log::Start();
 
-        PtraceListener ptrace_listener;
         StubServer stub_server(13377);
-        Predator predator(child_pid, &ptrace_listener);
-
         stub_server.Start();
 
+        PtraceListener ptrace_listener;
+        Predator predator(child_pid, &ptrace_listener);
         GdbStub stub = GdbStub(&predator, &ptrace_listener, &stub_server);
 
-        if (!predator.ChildThreadHijack(child_pid)) {
+        if (!predator.HijackChild(child_pid)) {
             LOG_ERROR(Debug, "[-] Cannot seize thread {}", child_pid);
             return -1;
         }
@@ -65,7 +64,7 @@ int main(int argc, char* argv[]) {
 
         // At this point we're sure we're talking to the right child
         LOG_INFO(Debug, "[*] Thread {} seized", child_pid);
-        predator.ChildThreadRegister(child_pid, SIGSTOP);
+        predator.ThreadRegister(child_pid, SIGSTOP);
 
         // wait for GDB
         // we're holding child thread stopped in case if the user
@@ -104,26 +103,16 @@ int main(int argc, char* argv[]) {
                 LOG_ERROR(Debug, "Stub unrecoverable error");
                 // exit(1);
             }
-            // ignore
-            // else if(stub_status_loop_command == 1){
-            //     continue
-            // }
 
             if (stub.LoopTrace())
                 continue;
-
-            LOG_ERROR(Debug, "Terminate child here");
-            // exit(0);
-            do_continue_what_you_do = false;
         }
 
-        ptrace(PTRACE_DETACH, child_pid, nullptr, nullptr);
-        kill(child_pid, SIGTERM);
-
+       // ptrace(PTRACE_DETACH, child_pid, nullptr, SIGINT);
         // change 0 to a variable returned by parent (or a child if ended with an error)
         // but idk
-        stub.End(0);
-        ptrace_listener.Stop();
+        // stub.End(0);
+        // ptrace_listener.Stop(); // this fucker can't get a hint to exit waitpid()
         stub_server.Stop();
         std::cout << "Parent exited\n";
     } else { ///< if (child_pid > 0)

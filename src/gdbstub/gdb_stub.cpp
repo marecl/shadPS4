@@ -39,23 +39,23 @@ s8 GdbStub::LoopCommand(void) {
 
     if (preprocess_status == -1) {
         LOG_ERROR(Debug, "Error while receiving packet");
-        SendMessage(E01);
+        this->SendMessage(E01);
         return -1;
     }
     if (preprocess_status == 0) {
         // '+' packet, ACK
-        SendMessage(message, true);
+        this->SendMessage(message, true);
         return 1;
     }
     if (preprocess_status == 2) {
         // '-' packet, repeat last response
-        SendMessage(response);
+        this->SendMessage(response);
         return 1;
     }
 
     if (preprocess_status != 1) {
         LOG_ERROR(Debug, "This shouldn't happen");
-        SendMessage(E01);
+        this->SendMessage(E01);
         return -2;
     }
 
@@ -66,7 +66,7 @@ s8 GdbStub::LoopCommand(void) {
 
     if (open_ended_handler_status == -1) {
         LOG_ERROR(Debug, "Some error. Investigate into GdbStub::HandleContinuous");
-        SendMessage(E01);
+        this->SendMessage(E01);
         return -1;
     }
 
@@ -79,13 +79,12 @@ s8 GdbStub::LoopCommand(void) {
         std::string handler_effect = HandlePacket(cmd);
         if (handler_effect == TOUCH_GRASS) {
             LOG_INFO(Debug, "Exit requested", response);
-            SendMessage(OK);
+            this->SendMessage(OK);
             return 0;
         }
 
         response = handler_effect;
-        LOG_INFO(Debug, "Sending reply:\n\tRES: {}", response);
-        SendMessage(response);
+        this->SendMessage(response);
         return 1;
     }
 
@@ -100,20 +99,20 @@ bool GdbStub::LoopTrace(void) {
         return 1;
 
     if (child_thread_exited(evt.status)) {
-        LOG_INFO(Debug, "[-] Thread {} exited with code {:02}", evt.tid,
+        LOG_INFO(Debug, "[--] Thread {} exited with code {:02}", evt.tid,
                  child_thread_exit_reason(evt.status));
 
         std::string thread_exit_notification =
             std::format("W{:02x};process:{:x};", child_thread_exit_reason(evt.status), evt.tid);
 
-        if (!SendMessage(thread_exit_notification))
+        if (!this->SendMessage(thread_exit_notification))
             predator->ChildThreadContinue(evt.tid);
         return 1;
     }
 
     if (child_thread_killed(evt.status)) {
         LOG_ERROR(Debug, "stub");
-        LOG_INFO(Debug, "[-] Thread {} was killed with {:02}", evt.tid,
+        LOG_INFO(Debug, "[__] Thread {} was killed with {:02}", evt.tid,
                  child_thread_kill_reason(evt.status));
         return 1;
     }
@@ -125,21 +124,20 @@ bool GdbStub::LoopTrace(void) {
 
     // child stopped, update state
     if (thread_state_t* thr = predator->FindThread(evt.tid); thr != nullptr) {
-        thr->running = (stop_reason == 0 || stop_reason == SIGCONT);
-        thr->signal = (stop_reason == SIGCONT) ? 0 : stop_reason;
+        predator->UpdateRunningState(*thr, stop_reason);
     }
 
     if (child_thread_sigtrap_is_syscall(evt.status)) {
         LOG_ERROR(Debug, "stub");
-        LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP", evt.tid);
+        LOG_INFO(Debug, "[*!] Thread {} got SYSCALL SIGTRAP", evt.tid);
         std::string thread_stop_sigtrap_syscall_notification =
-            std::format("T{:02x}thread:{:x}", stop_reason, evt.tid);
-        if (!SendMessage(thread_stop_sigtrap_syscall_notification))
+            std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
+        if (!this->SendMessage(thread_stop_sigtrap_syscall_notification))
             predator->ChildThreadContinue(evt.tid);
     }
 
     if (stop_reason == SIGSTOP) {
-        LOG_INFO(Debug, "[*] Thread {} got SIGSTOP", evt.tid);
+        LOG_INFO(Debug, "[*!] Thread {} got SIGSTOP", evt.tid);
         if (thread_state_t* _ = predator->FindThread(evt.tid); _ == nullptr) {
             // *likely* a child that raised SIGSTOP faster than parent could emit an event
             // push it back and hope it will get resolved by itself
@@ -147,37 +145,37 @@ bool GdbStub::LoopTrace(void) {
             return 1;
         }
 
-        std::string thread_stop_sigstop_notification =
-            std::format("T{:02x}thread:{:x}", stop_reason, evt.tid);
-        if (!SendMessage(thread_stop_sigstop_notification))
-            predator->ChildThreadContinue(evt.tid);
+        // std::string thread_stop_sigstop_notification =
+        //     std::format("T{:02x}thread:{:x}", stop_reason, evt.tid);
+        // if (!this->SendMessage(thread_stop_sigstop_notification))
+        //     predator->ChildThreadContinue(evt.tid);
         return 1;
     }
 
     if (stop_reason == SIGCONT) {
         // Shouldn't happen anyway
-        LOG_INFO(Debug, "[*] Thread {} continuing", evt.tid);
+        LOG_INFO(Debug, "[**] Thread {} continuing", evt.tid);
         // predator.ChildThreadContinue(evt.tid);
         return 1;
     }
 
     if (stop_reason == SIGTRAP) {
-        LOG_INFO(Debug, "[*] Thread {} got SIGTRAP", evt.tid);
+        LOG_INFO(Debug, "[*!] Thread {} got SIGTRAP", evt.tid);
 
         if (child_thread_evt_clone(evt.status)) {
             unsigned long new_tid = 0;
             ptrace(PTRACE_GETEVENTMSG, evt.tid, nullptr, &new_tid);
-            LOG_INFO(Debug, "[+] New thread/process: {}", new_tid);
+            LOG_INFO(Debug, "[*+] New thread/process: {}", new_tid);
 
             // Child will sigstop on its own
             thread_event_t clone_evt = listener->Wait();
 
-            this->predator->ChildThreadRegister(clone_evt.tid, SIGSTOP);
+            this->predator->ThreadRegister(clone_evt.tid, SIGSTOP);
             this->predator->ChildThreadInterruptAll();
 
             std::string thread_evt_creation_notification =
-                std::format("T{:02x}create:{:x};", stop_reason, clone_evt.tid);
-            if (!this->stub_server->SendMessage(thread_evt_creation_notification))
+                std::format("T{:02x}thread:{:x};clone:{:x};", stop_reason, evt.tid, clone_evt.tid);
+            if (!this->SendMessage(thread_evt_creation_notification))
                 predator->ChildThreadContinueAll();
 
             //  predator.ChildThreadContinue(evt.tid);
@@ -187,15 +185,15 @@ bool GdbStub::LoopTrace(void) {
         }
 
         if (child_thread_evt_exit(evt.status)) {
-            LOG_ERROR(Debug, "stub");
-            LOG_INFO(Debug, "[-] Thread {} exits with status {}", evt.tid, evt.status);
+            LOG_INFO(Debug, "[*-] Thread {} exits with status {}", evt.tid, evt.status);
 
             // check if it's main thread and return 0 i think
-            this->predator->ChildThreadRemove(evt.tid);
+            this->predator->ThreadRemove(evt.tid);
 
             std::string thread_evt_exit_notification =
-                std::format("W{:02x};process:{:x};", stop_reason, evt.tid);
-            if (!this->stub_server->SendMessage(thread_evt_exit_notification))
+                std::format("w{:02x};{:x}", evt.status,
+                            evt.tid); // may need to change status to stop_reason lol
+            if (!this->SendMessage(thread_evt_exit_notification))
                 this->predator->ChildThreadContinue(evt.tid); // or continue all, idk yet
 
             return 1;
@@ -218,8 +216,8 @@ bool GdbStub::LoopTrace(void) {
         }
 
         std::string thread_sigsegv_notification =
-            std::format("T{:02x}thread:{:x}", stop_reason, evt.tid);
-        if (!this->stub_server->SendMessage(thread_sigsegv_notification)) {
+            std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
+        if (!this->SendMessage(thread_sigsegv_notification)) {
             this->predator->DumpRegs(evt.tid);
             LOG_ERROR(Debug, "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)",
                       evt.tid, info.si_code, predator->user_regs.rip,
@@ -232,7 +230,7 @@ bool GdbStub::LoopTrace(void) {
     LOG_INFO(Debug, "[*] Thread {} stopped with signal {:02}", evt.tid, stop_reason);
     std::string thread_stop_other_notification =
         std::format("T{:02x}thread:{:x}", stop_reason, evt.tid);
-    if (!SendMessage(thread_stop_other_notification))
+    if (!this->SendMessage(thread_stop_other_notification))
         this->predator->ChildThreadContinue(evt.tid);
 
     return 1;
@@ -242,6 +240,11 @@ bool GdbStub::LoopTrace(void) {
 // doesn't return anything to client
 s8 GdbStub::HandleContinuous(GdbCommand cmd) {
     char maincmd = cmd.cmd[0];
+    if (maincmd == 'c' || maincmd == 'C') {
+        LOG_ERROR(Debug, "Stub. Don't implement unless gdb doesn't speak vCont");
+        return -1;
+    }
+    /*
     if (maincmd == 'C') {
         LOG_WARNING(Debug, "stub. basically 'c' with passing on a signal");
     }
@@ -259,7 +262,7 @@ s8 GdbStub::HandleContinuous(GdbCommand cmd) {
         }
         predator->ChildThreadContinue(target, sig);
         return 1;
-    }
+    }*/
 
     // this is the "running" half that returns nothing if main thread is running
     if (maincmd == '?') {
@@ -269,6 +272,12 @@ s8 GdbStub::HandleContinuous(GdbCommand cmd) {
         // send nothing if running
         return target->running ? 1 : 0;
     }
+
+    if (cmd.cmd == "vCont") {
+        handle_packet_vCont(cmd.arg);
+        return 1;
+    }
+
     return 0;
 }
 
@@ -287,7 +296,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             return E01;
 
         // in this case signal always means stop, so we can ignore possibility of SIGCONT
-        return std::format("T{:02}", target->signal);
+        return std::format("T{:02x}", target->signal);
     }
     if (maincmd == 'D') {
         return TOUCH_GRASS;
@@ -311,17 +320,21 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         LOG_WARNING(Debug, "stub. confirm if interrupting an already stopped thread will cause "
                            "ptrace() to throw a fail (even though it's stopped)");
 
-        thread_state_t* target = this->predator->FindThread(predator->thread_sel_flow);
+        ThreadID target = predator->thread_sel_flow;
 
-        if (target == nullptr)
+        if (target == -1)
+            predator->ChildThreadInterruptAll();
+        if (target == 0)
+            predator->ChildThreadInterrupt(predator->main_thread);
+
+        thread_state_t* specified_target = this->predator->FindThread(predator->thread_sel_flow);
+
+        if (specified_target == nullptr)
             return E01;
 
-        if (target->tid == predator->main_thread)
-            predator->ChildThreadInterruptAll();
-        else
-            predator->ChildThreadInterrupt(target->tid);
+        predator->ChildThreadInterrupt(specified_target->tid);
 
-        return std::format("T{:02}", target->signal);
+        return std::format("T{:02x}", specified_target->signal);
     }
 
     if (maincmd == 'm') {
@@ -413,7 +426,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         }
         if (cmd.cmd == "vCont?") {
             // return "vCont;s;c;t";
-            return "vCont;c;t"; // step currently not implemented
+            return "vCont;c;C;s;S;t"; // step currently not implemented
         }
         return "";
     }
@@ -438,7 +451,8 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         if (cmd.cmd == "qSupported") {
             //  - probably necessary in the near future
             // binary-upload+ - unnecessary for now, maybe ever
-            std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+;QThreadEvents+";
+            std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+;QThreadEvents+;"
+                               "vContSupported+;QThreadEvents+;vCont+";
             // just in case i'm far enough to need breakpoints
             if (resp.find("swbreak+"))
                 resp += ";swbreak+";
@@ -468,7 +482,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
     return E01;
 }
 
-void GdbStub::End(u8 code) {
+void GdbStub::End(int code) {
     SendMessage(std::format("W{:02x}", code));
 }
 
@@ -483,20 +497,6 @@ std::string GdbStub::ThreadList() {
 
     buffer += "</threads>";
     return buffer;
-}
-
-bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) {
-    // const auto mem = Memory::Instance();
-
-    // if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
-    //     return false;
-    // }
-
-    for (u64 i = 0; i < length; ++i) {
-        *out += fmt::format("{:02x}", *reinterpret_cast<u8*>(address + i));
-    }
-
-    return true;
 }
 
 // we need this to map user_regs_struct to GDB
@@ -572,8 +572,65 @@ std::string GdbStub::PrintRegisters(const struct user_regs_struct* regs,
     return out;
 }
 
-bool GdbStub::SendMessage(std::string message, bool raw) {
-    if (!raw)
+bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) {
+    // const auto mem = Memory::Instance();
+
+    // if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
+    //     return false;
+    // }
+
+    for (u64 i = 0; i < length; ++i) {
+        *out += fmt::format("{:02x}", *reinterpret_cast<u8*>(address + i));
+    }
+
+    return true;
+}
+
+bool GdbStub::SendMessage(std::string message, bool raw_and_mute) {
+    if (!this->stub_server->ClientConnected())
+        return false;
+
+    if (!raw_and_mute) {
+        LOG_INFO(Debug, "Sending:\n\tRES: {}", message);
         message = MakeResponse(message);
+    }
     return this->stub_server->SendMessage(message);
+}
+
+void GdbStub::handle_packet_vCont(std::string arg) {
+    std::vector<std::string> targets = Split(arg, ';');
+
+    // we assume that 1) one vCont doesn't mix c/s/t packets,
+    // and 2) the "general" action is always last
+    // latter is meh, unlikely. first one is problematic,
+    // as it'd need a list of threads with pending operations
+    for (std::string combination : targets) {
+        auto sep_idx = combination.find(':');
+        char action = combination[0];
+        int signal = 0;
+        ThreadID target = 0;
+
+        // Example: C13:D3AF;c
+        if (combination.length() >= 3 && sep_idx >= 3) {
+            // sep_idx not found basically so it'll be bigger than 3
+            // length >3 so no problem. right where we want it.
+            signal = std::strtol(combination.substr(1, 2).c_str(), nullptr, 16);
+        }
+
+        if (sep_idx != std::string::npos) {
+            target = std::strtol(combination.substr(sep_idx + 1).c_str(), nullptr, 16);
+        }
+        std::cout << action << '\t' << signal << '\t' << std::hex << target << std::dec
+                  << std::endl;
+
+        switch (action) {
+        case 'C': ///< Supplies its own code
+        case 'c': ///< No code (default: 0)
+            if (target != 0)
+                predator->ChildThreadContinue(target, signal);
+            else
+                predator->ChildThreadContinueAll(signal);
+            break;
+        }
+    }
 }
