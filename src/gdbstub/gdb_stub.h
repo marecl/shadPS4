@@ -11,61 +11,40 @@
 
 #include "childtools.h"
 #include "common/types.h"
+#include "gdb_server.h"
 #include "ptrace_listener.h"
 #include "threadinfo.h"
 
-namespace Core::Devtools {
+#include "gdb_command.h"
 
-namespace GdbStub {
+class GdbStub {
+public:
+    GdbStub(Predator* predator, PtraceListener* listener, StubServer* stub_server)
+        : predator(predator), listener(listener), stub_server(stub_server) {};
+    ~GdbStub() {};
+    void End(u8 code);
 
-extern const char* const OK;
-extern const char* const E01;
-extern const char* const touch_grass;
+    s8 LoopCommand(void);
+    bool LoopTrace(void);
+    s8 HandleContinuous(GdbCommand cmd);
+    std::string HandlePacket(GdbCommand cmd);
 
-extern Predator* predator;
-extern PtraceListener* listener;
+    // printing for gdb
+    std::string ThreadList(void);
+    std::string PrintRegisters(const struct user_regs_struct* regs,
+                               const struct user_fpregs_struct* fpregs);
+    bool ReadMemory(const u64 address, const u64 length, std::string* out);
 
-enum class ControlCode : char {
-    Ack = '+',
-    Nack = '-',
-    PacketStart = '$',
-    PacketEnd = '#',
-    Interrupt = '\03',
+    // pretty generic if you asked me
+    // just get rid of those control characters, jeez
+
+private:
+    bool SendMessage(std::string message, bool raw = false);
+
+
+    Predator* predator;
+    PtraceListener* listener;
+    StubServer* stub_server;
 };
-
-enum LoopAction {
-    ERROR,          ///< Error, what to do - idk, just notify the user
-    EXIT,           ///< GDB signaled to detach. RN it kills the whole app
-    BACK_TO_SENDER, ///< Send back whatever GDB sent
-    REPEAT,         ///< Repeat last response (no change)
-    SEND,           ///< Send response
-    NOSEND          ///< Don't send anything (now)
-};
-
-struct GdbCommand {
-    std::string raw{};
-    std::string cmd{};
-    std::string arg{};
-};
-
-LoopAction Loop(std::string message, std::string& response);
-s8 HandleContinuous(GdbCommand cmd);
-std::string HandlePacket(GdbCommand cmd);
-
-// printing for gdb
-std::string ThreadList(void);
-std::string PrintRegisters(const struct user_regs_struct* regs,
-                           const struct user_fpregs_struct* fpregs);
-bool ReadMemory(const u64 address, const u64 length, std::string* out);
-
-// pretty generic if you asked me
-// just get rid of those control characters, jeez
-s8 Preprocess(std::string& data);
-GdbCommand ParsePacket(const std::string data);
-std::string MakeResponse(const std::string msg);
-
-} // namespace GdbStub
-
-} // namespace Core::Devtools
 
 #endif // GDB_STUB_H

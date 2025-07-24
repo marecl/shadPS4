@@ -22,6 +22,17 @@ typedef struct _thread_state_t {
     int signal{0};
 } thread_state_t;
 
+enum ChildAction {
+    EXIT,
+    KILL,
+    STOP_STOP,
+    STOP_SIGSEGV,
+    STOP_SIGTRAP,
+    STOP_SIGSTOP,
+    STOP_EVT_CLONE,
+    STOP_EVT_EXIT
+};
+
 class Predator {
 public:
     Predator(ThreadID main_thread, PtraceListener* listener)
@@ -30,7 +41,6 @@ public:
     ~Predator() {};
 
     // Flow control
-
     bool ChildThreadHijack(ThreadID target);
     // Default signal for continuing is 0, SIGCONT doesn't really exist in GDB
     void ChildThreadRegister(ThreadID target, int signal = 0);

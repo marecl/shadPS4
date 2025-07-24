@@ -41,10 +41,10 @@ int main(int argc, char* argv[]) {
         PtraceListener ptrace_listener;
         StubServer stub_server(13377);
         Predator predator(child_pid, &ptrace_listener);
-        Core::Devtools::GdbStub::predator = &predator;
-        Core::Devtools::GdbStub::listener = &ptrace_listener;
 
         stub_server.Start();
+
+        GdbStub stub = GdbStub(&predator, &ptrace_listener, &stub_server);
 
         if (!predator.ChildThreadHijack(child_pid)) {
             LOG_ERROR(Debug, "[-] Cannot seize thread {}", child_pid);
@@ -81,12 +81,8 @@ int main(int argc, char* argv[]) {
         }
 
         // could link it directly to server, but let's keep it in case of getting '-' packet
-        std::string response{};
-        std::string msg{};
-        thread_event_t evt{};
-        bool do_continue_what_you_do{true};
 
-        using namespace Core::Devtools;
+        bool do_continue_what_you_do{true};
 
         while (do_continue_what_you_do) {
 
@@ -94,143 +90,41 @@ int main(int argc, char* argv[]) {
                 do_continue_what_you_do = false;
             }
 
-            if (stub_server.GetMessage(msg)) {
-                GdbStub::LoopAction send_response = GdbStub::Loop(msg, response);
+            s8 stub_status_loop_command = stub.LoopCommand();
 
-                switch (send_response) {
-                case GdbStub::LoopAction::ERROR:
-                    stub_server.SendMessage(GdbStub::MakeResponse(GdbStub::E01));
-                    break;
-                case GdbStub::LoopAction::BACK_TO_SENDER: ///< as-is
-                    stub_server.SendMessage(msg);
-                    break;
-                case GdbStub::LoopAction::EXIT:
-                    predator.ChildThreadRemove(0);
-                    stub_server.SendMessage(GdbStub::MakeResponse(GdbStub::OK));
-                    break;
-                case GdbStub::LoopAction::REPEAT: ///< Response is not modified
-                case GdbStub::LoopAction::SEND:   ///< Response is modified
-                    stub_server.SendMessage(GdbStub::MakeResponse(response));
-                    break;
-                case GdbStub::LoopAction::NOSEND:
-                    break;
-                }
+            if (stub_status_loop_command == 0) {
+                do_continue_what_you_do = false;
+                LOG_ERROR(Debug, "Terminate child here");
+                // exit(0);
+            } else if (stub_status_loop_command == -1) {
+                LOG_ERROR(Debug, "Stub recoverable error");
+
+            } else if (stub_status_loop_command == -2) {
+                do_continue_what_you_do = false;
+                LOG_ERROR(Debug, "Stub unrecoverable error");
+                // exit(1);
             }
+            // ignore
+            // else if(stub_status_loop_command == 1){
+            //     continue
+            // }
 
-            if (!ptrace_listener.Poll(evt))
+            if (stub.LoopTrace())
                 continue;
 
-            if (child_thread_exited(evt.status)) {
-                LOG_INFO(Debug, "[-] Thread {} exited with code {:02}", evt.tid,
-                         child_thread_exit_reason(evt.status));
-
-                if (stub_server.ClientConnected()) {
-                    std::string thread_exit_notification =
-                        std::format("w{:02x};{:x};", evt.tid, child_thread_exit_reason(evt.status));
-                    stub_server.SendMessage(GdbStub::MakeResponse(thread_exit_notification));
-                } else
-
-                    predator.ChildThreadContinue(evt.tid);
-                continue;
-            }
-
-            if (child_thread_killed(evt.status)) {
-                LOG_INFO(Debug, "[-] Thread {} was killed with {:02}", evt.tid,
-                         child_thread_kill_reason(evt.status));
-                continue;
-            }
-
-            if (!child_thread_stopped(evt.status))
-                continue;
-
-            int stop_reason = child_thread_stop_reason(evt.status);
-
-            if (thread_state_t* thr = predator.FindThread(evt.tid); thr != nullptr) {
-                thr->running = (stop_reason == 0 || stop_reason == SIGCONT);
-                thr->signal = (stop_reason == SIGCONT) ? 0 : stop_reason;
-            }
-
-            if (child_thread_sigtrap_is_syscall(evt.status)) {
-                LOG_INFO(Debug, "[*] Thread {} got SYSCALL SIGTRAP", evt.tid);
-                // predator.ChildThreadContinue(tid);
-            }
-
-            if (stop_reason == SIGTRAP) {
-                LOG_INFO(Debug, "[*] Thread {} got SIGTRAP", evt.tid);
-
-                if (child_thread_evt_clone(evt.status)) {
-                    unsigned long new_tid = 0;
-                    ptrace(PTRACE_GETEVENTMSG, evt.tid, nullptr, &new_tid);
-                    LOG_INFO(Debug, "[+] New thread/process: {}", new_tid);
-
-                    // Child will sigstop on its own
-                    thread_event_t clone_evt = ptrace_listener.Wait();
-
-                    predator.ChildThreadRegister(clone_evt.tid, SIGSTOP);
-                    predator.ChildThreadInterruptAll();
-
-                    if (stub_server.ClientConnected()) {
-                        std::string thread_creation_notification =
-                            std::format("T05create:{:x};", clone_evt.tid);
-                        stub_server.SendMessage(
-                            GdbStub::MakeResponse(thread_creation_notification));
-                    } else {
-                        predator.ChildThreadContinueAll();
-                    }
-
-                    //  predator.ChildThreadContinue(evt.tid);
-                    // predator.ChildThreadContinue(clone_evt.tid);
-
-                    continue;
-                }
-
-                if (child_thread_evt_exit(evt.status)) {
-                    LOG_INFO(Debug, "[-] Thread {} exits with status {}", evt.tid, evt.status);
-                    predator.ChildThreadRemove(evt.tid);
-                    predator.ChildThreadContinue(evt.tid);
-                    continue;
-                }
-                // no other events, carry on
-                predator.ChildThreadContinue(evt.tid);
-
-            } else if (stop_reason == SIGSEGV) {
-                siginfo_t info;
-                if (ptrace(PTRACE_GETSIGINFO, evt.tid, 0, &info) == 0) {
-                    // Apparently we DO like this particular kind (Linux only?)
-                    if (info.si_code == SEGV_ACCERR) {
-                        predator.ChildThreadContinue(evt.tid, SIGSEGV, true);
-                    } else { // The rest is highly undesired
-
-                        predator.DumpRegs(evt.tid);
-                        LOG_ERROR(Debug,
-                                  "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)",
-                                  evt.tid, info.si_code, predator.user_regs.rip,
-                                  predator.user_regs.rip - 0x7FF000000);
-                    }
-                }
-            } else if (stop_reason == SIGSTOP) {
-                LOG_INFO(Debug, "[*] Thread {} got SIGSTOP", evt.tid);
-
-                if (thread_state_t* _ = predator.FindThread(evt.tid); _ != nullptr) {
-                    predator.ChildThreadContinue(evt.tid);
-                } else {
-                    // *likely* a child that raised SIGSTOP faster than parent could emit an event
-                    ptrace_listener.Place(evt);
-                }
-
-            } else if (stop_reason == SIGCONT) {
-                LOG_INFO(Debug, "[*] Thread {} continuing", evt.tid);
-                // predator.ChildThreadContinue(evt.tid);
-            } else {
-                LOG_INFO(Debug, "[*] Thread {} stopped with signal {:02}", evt.tid, stop_reason);
-                predator.ChildThreadContinue(evt.tid);
-            }
+            LOG_ERROR(Debug, "Terminate child here");
+            // exit(0);
+            do_continue_what_you_do = false;
         }
 
         ptrace(PTRACE_DETACH, child_pid, nullptr, nullptr);
         kill(child_pid, SIGTERM);
-        stub_server.Stop();
+
+        // change 0 to a variable returned by parent (or a child if ended with an error)
+        // but idk
+        stub.End(0);
         ptrace_listener.Stop();
+        stub_server.Stop();
         std::cout << "Parent exited\n";
     } else { ///< if (child_pid > 0)
         std::cout << "Fork error\n";

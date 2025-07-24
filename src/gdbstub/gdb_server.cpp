@@ -47,6 +47,9 @@ bool StubServer::GetMessage(std::string& out) {
 }
 
 bool StubServer::SendMessage(std::string in) {
+    if (!this->ClientConnected()) {
+        return false;
+    }
     ssize_t sent = send(_socket_client.load(), in.c_str(), in.size(), 0);
     if (sent == -1) {
         std::cout << "Error while sending message" << std::endl;

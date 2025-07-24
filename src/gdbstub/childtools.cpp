@@ -162,7 +162,6 @@ bool Predator::ChildThreadInterrupt(ThreadID target) {
 bool Predator::ChildThreadInterruptAll(void) {
     std::vector<ThreadID> target_threads{};
 
-    LOG_INFO(Debug, "Interrupting {} thread(s)", this->threads.size());
     for (auto [tid, info] : this->threads) {
         if (!info.running)
             continue;
@@ -176,6 +175,7 @@ bool Predator::ChildThreadInterruptAll(void) {
     thread_event_t evt{};
     bool all_stopped = false;
 
+    LOG_INFO(Debug, "Interrupting {} thread(s)", target_threads.size());
     while (!target_threads.empty()) {
         if (!listener->Poll(evt))
             continue;

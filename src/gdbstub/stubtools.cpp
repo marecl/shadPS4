@@ -7,9 +7,57 @@
 
 #include <fmt/xchar.h>
 
+#include "gdb_command.h"
 #include "stubtools.h"
 
 static std::string byteSwapString(std::string data, u8 width);
+
+s8 Preprocess(std::string& data) {
+    if (data.empty())
+        return -1;
+
+    const char cc = data.front();
+
+    switch (cc) {
+    case static_cast<char>(ControlCode::Ack):
+        return 0;
+    case static_cast<char>(ControlCode::Interrupt):
+        return 1;
+    case static_cast<char>(ControlCode::Nack):
+        return 2;
+    }
+
+    return 1;
+}
+
+GdbCommand ParsePacket(const std::string data) {
+
+    if (data.front() == char(ControlCode::Interrupt)) {
+        return GdbCommand{"\03", "\03", "\03"};
+    }
+
+    const auto end_pos = data.find(char(ControlCode::PacketEnd));
+
+    if (data[0] != char(ControlCode::PacketStart) || end_pos == std::string::npos) {
+        return GdbCommand{};
+    }
+
+    const std::string_view cmd_view = std::string_view(data).substr(1, end_pos - 1);
+
+    GdbCommand out{data, std::string(cmd_view), ""};
+
+    if (cmd_view.length() == 1)
+        return out;
+
+    auto septoken = cmd_view.find_first_of(":;");
+    auto maybeNumber = cmd_view.find_first_of("-0123456789");
+    if (const size_t pos = std::min(septoken, maybeNumber); pos != std::string::npos) {
+        out.cmd = cmd_view.substr(0, pos);
+        out.arg = cmd_view.substr(pos + (pos == septoken ? 1 : 0));
+    }
+
+    return out;
+}
 
 u8 CalculateChecksum(const std::string& command) {
     u8 sum = 0;
@@ -19,7 +67,7 @@ u8 CalculateChecksum(const std::string& command) {
     return sum & 0xFF;
 }
 
-std::string MakeResponseImpl(const std::string msg) {
+std::string MakeResponse(const std::string msg) {
     // compressed response
     // std::string cpr{};
     // cpr = std::regex_replace(msg, std::regex("0000"), "0* ");
