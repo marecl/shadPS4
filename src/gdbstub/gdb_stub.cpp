@@ -91,6 +91,8 @@ s8 GdbStub::LoopCommand(void) {
         std::string handler_effect = HandlePacket(cmd);
         if (handler_effect == TOUCH_GRASS) {
             this->SendMessage(OK);
+            this->stub_server->RestartSession();
+            this->client_connected = false;
             this->predator->ChildThreadContinueAll();
             return 0;
         }
@@ -296,8 +298,6 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
     char maincmd = cmd.cmd[0];
 
     if (maincmd == '?') {
-        // this is the "running" half that returns nothing if main thread is running
-        LOG_WARNING(Debug, "stub, update stop reason signal,change to T ???and list threads??");
         thread_state_t* target = this->predator->FindThread(0);
 
         // shouldn't happen lol
@@ -334,10 +334,6 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == '\03') {
-        // TODO: throw out somewhere
-        LOG_WARNING(Debug, "stub. confirm if interrupting an already stopped thread will cause "
-                           "ptrace() to throw a fail (even though it's stopped)");
-
         ThreadID target = this->predator->GetTargetFlowControl();
         // reminder: 0 for main, -1 is all (caught as main), specific for specific
         thread_state_t* target_thread = this->predator->FindThread(target);
@@ -437,8 +433,9 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             return "";
         }
         if (cmd.cmd == "vCont?") {
-            // return "vCont;s;c;t";
-            return "vCont;c;C;s;S;t"; // step currently not implemented
+            // cCt MUST be
+            // return "vCont;c;C;s;S;t";
+            return "vCont;c;C"; // step and stop not supported
         }
         return "";
     }
@@ -463,9 +460,9 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         if (cmd.cmd == "qSupported") {
             //  - probably necessary in the near future
             // binary-upload+ - unnecessary for now, maybe ever
-            std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+;QThreadEvents+;"
-                               "vContSupported+;vCont+";
+            std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+;QThreadEvents+";
             // just in case i'm far enough to need breakpoints
+            // vContSupported+ must be sent by gdb, otherwise no debugging
             if (resp.find("swbreak+"))
                 resp += ";swbreak+";
             return resp;
@@ -642,6 +639,10 @@ void GdbStub::handle_packet_vCont(std::string arg) {
         thread_state_t* target_thread = this->predator->FindThread(target);
 
         switch (action) {
+        default:
+        // check vCont? if implementing these
+            LOG_ERROR(Debug, "vCont:{} not supported (yet)");
+            break;
         case 'C': ///< Supplies its own code
         case 'c': ///< No code (default: 0)
             if (target == 0)
