@@ -115,36 +115,29 @@ s8 GdbStub::LoopCommand(void) {
 }
 
 // -2 error (yeet), -1 error (continue execution), 0 exit, 1 continue execution
-bool GdbStub::LoopTrace(void) {
+void GdbStub::LoopTrace(void) {
     static thread_event_t evt{};
 
     if (!listener->Poll(evt))
-        return 1;
+        return;
 
     if (child_thread_exited(evt.status)) {
         LOG_INFO(Debug, "[--] EXIT: {} exited with code {:02}", evt.tid,
                  child_thread_exit_reason(evt.status));
 
-        std::string thread_exit_notification =
-            std::format("W{:02x};process:{:x};", child_thread_exit_reason(evt.status), evt.tid);
-        this->SendMessage(thread_exit_notification);
-
         predator->ThreadRemove(evt.tid);
-        predator->ChildThreadContinueAll();
-
-        return 1;
+        return;
     }
 
     if (child_thread_killed(evt.status)) {
         LOG_ERROR(Debug, "untested: child_thread_killed");
         LOG_INFO(Debug, "[__] KILL?: {} was killed with {:02}", evt.tid,
                  child_thread_kill_reason(evt.status));
-        // There's no packet to signal thread being *killed*
-        return 1;
+        // There's no packet to signal thread being *killed*        return;
     }
 
     if (!child_thread_stopped(evt.status))
-        return 1;
+        return;
 
     int stop_reason = child_thread_stop_reason(evt.status);
 
@@ -168,72 +161,58 @@ bool GdbStub::LoopTrace(void) {
             // *likely* a child that raised SIGSTOP faster than parent could emit an event
             // push it back and hope it will get resolved by itself
             listener->Place(evt);
-            return 1;
+            return;
         }
 
         std::string thread_stop_sigstop_notification =
             std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
         if (!this->SendMessage(thread_stop_sigstop_notification))
             predator->ChildThreadContinue(evt.tid);
-        return 1;
+        return;
     }
 
     if (stop_reason == SIGCONT) {
         // Shouldn't happen anyway
         LOG_INFO(Debug, "[**] SIGCONT: {}", evt.tid);
-        return 1;
+        return;
     }
 
     if (stop_reason == SIGTRAP) {
-
-        if (child_thread_evt_none(evt.status)) {
-            LOG_INFO(Debug, "[*!] SIGTRAP: {} caught a breakpoint", evt.tid);
-
-            // GDB expects the SIGTRAPped thread to be selected for reg dump immediately
-            predator->ChildThreadInterruptAll();
-            this->predator->thread_sel_reg_dump = evt.tid;
-
-            std::string thread_evt_notification =
-                std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
-            if (!this->SendMessage(thread_evt_notification))
-                this->predator->ChildThreadContinueAll();
-
-            return 1;
-        }
+        std::string thread_evt_notification{};
+        // why can't we just stop them all here? (see: evt_clone)
+        // also, DON'T MOVE THAT LOWER
+        // so far its the only edge case, where threads can't be stopped immediately after entering
 
         if (child_thread_evt_clone(evt.status)) {
             unsigned long new_tid = 0;
             ptrace(PTRACE_GETEVENTMSG, evt.tid, nullptr, &new_tid);
             LOG_INFO(Debug, "[*+] SIGTRAP EVENT: {} created new thread: {}", evt.tid, new_tid);
 
-            // if ptrace_o_traceclone is used, new thread will raise sigstop on its own
+            // we have to wait for the spawned thread *first* because it emits SIGSTOP
+            // and it may or may not happen *before* parent thread stops
             thread_event_t clone_evt = listener->Wait();
-
-            this->predator->ThreadRegister(clone_evt.tid, SIGSTOP);
             this->predator->ChildThreadInterruptAll();
 
-            std::string thread_evt_creation_notification =
+            this->predator->ThreadRegister(clone_evt.tid, SIGSTOP);
+
+            thread_evt_notification =
                 std::format("T{:02x}thread:{:x};clone:{:x};", stop_reason, evt.tid, clone_evt.tid);
-            if (!this->SendMessage(thread_evt_creation_notification))
-                predator->ChildThreadContinueAll();
+        } else
+            this->predator->ChildThreadInterruptAll();
 
-            //  predator.ChildThreadContinue(evt.tid);
-            // predator.ChildThreadContinue(clone_evt.tid);
+        if (child_thread_evt_none(evt.status)) {
+            LOG_INFO(Debug, "[*!] SIGTRAP: {} caught a breakpoint", evt.tid);
 
-            return 1;
+            // GDB expects the SIGTRAPped thread to be selected for reg dump immediately
+            this->predator->thread_sel_reg_dump = evt.tid;
+            thread_evt_notification = std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
         }
 
         if (child_thread_evt_exit(evt.status)) {
             LOG_INFO(Debug, "[*-] SIGTRAP EVENT: {} exits with status {}", evt.tid, evt.status);
-            this->predator->ChildThreadInterruptAll(); // GDB expects everything to stop
 
             // data is available to read, but there's no guarantee the thread itself is there
-            std::string thread_evt_exit_notification =
-                std::format("w{:x};{:x}", evt.status, evt.tid);
-            if (!this->SendMessage(thread_evt_exit_notification))
-                this->predator->ChildThreadContinue(evt.tid); // or continue all, idk yet
-
-            return 1;
+            thread_evt_notification = std::format("w{:x};{:x}", evt.status, evt.tid);
         }
 
         if (child_thread_evt_fork(evt.status)) {
@@ -245,34 +224,44 @@ bool GdbStub::LoopTrace(void) {
             LOG_ERROR(Debug, "SIGTRAP EVENT: [not implemented] child_thread_evt_execve");
         }
 
-        // unhandled event
-        LOG_ERROR(Debug, "unknown and unhandled event. status: {}", evt.status);
-        LOG_ERROR(Debug, "program may hang here. i don't care.");
-        return 1; // unknown other event
+        // end of event handlers
+        if (thread_evt_notification.empty()) {
+            LOG_ERROR(Debug, "unknown or unhandled event. status: {}", evt.status);
+            LOG_ERROR(Debug, "program may hang here. i don't care.");
+            return;
+        }
+
+        if (this->SendMessage(thread_evt_notification))
+            return;
+
+        // event happened, not sent so we're not attached. let's go
+        this->predator->ChildThreadContinueAll();
+        return;
     }
 
     if (stop_reason == SIGSEGV) {
         siginfo_t info;
 
         if (ptrace(PTRACE_GETSIGINFO, evt.tid, 0, &info) != 0)
-            return -1;
+            return;
 
         // Apparently we DO like this particular kind (Linux only?)
         if (info.si_code == SEGV_ACCERR) {
             this->predator->ChildThreadContinue(evt.tid, SIGSEGV, true);
-            return 1;
+            return;
         }
 
-        LOG_ERROR(Debug, "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)", evt.tid,
-                  info.si_code, predator->user_regs.rip, predator->user_regs.rip - 0x7FF000000);
+        LOG_ERROR(Debug, "[untested] handling SIGSEGV other than SEGV_ACCERR");
+        LOG_ERROR(Debug, "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (0x{:X})",
+                  evt.tid, info.si_code, predator->user_regs.rip,
+                  predator->user_regs.rip - 0x7FF000000);
 
-        LOG_ERROR(Debug, "untested: stop_reason==SIGSEGV other than SEGV_ACCERR");
         std::string thread_sigsegv_notification =
             std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
         if (!this->SendMessage(thread_sigsegv_notification)) {
-            this->predator->DumpRegs(evt.tid);
-            // this->predator->ChildThreadContinue(evt.tid, SIGSEGV);
+            this->predator->ChildThreadContinue(evt.tid, SIGSEGV);
         }
+        return;
     }
 
     LOG_INFO(Debug, "[*] Thread {} stopped with signal {:02}", evt.tid, stop_reason);
@@ -280,8 +269,7 @@ bool GdbStub::LoopTrace(void) {
         std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
     if (!this->SendMessage(thread_stop_other_notification))
         this->predator->ChildThreadContinue(evt.tid);
-
-    return 1;
+    return;
 }
 
 // -1 fail, 0 wrong handler, 1 - action done, don't continue in Loop
