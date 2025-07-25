@@ -18,7 +18,7 @@
 #include "threadinfo.h"
 
 // Show received/sent data. It's a lot and may obfuscate the rest of the program
-#define DEBUG_COMM
+//#define DEBUG_COMM
 
 class GdbStub {
 public:

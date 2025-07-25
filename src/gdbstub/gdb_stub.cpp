@@ -141,17 +141,19 @@ void GdbStub::LoopTrace(void) {
     int stop_reason = child_thread_stop_reason(evt.status);
 
     // child stopped, update state
-    if (thread_state_t* thr = predator->FindThread(evt.tid); thr != nullptr) {
-        predator->UpdateRunningState(*thr, stop_reason);
+    thread_state_t* thread_in_question = predator->FindThread(evt.tid);
+    if (thread_in_question != nullptr) {
+        predator->UpdateRunningState(*thread_in_question, stop_reason);
     }
 
     // GDB probably expects regs to be dumped from the calling thread,
     // since the target stopped by itself
     this->predator->DumpRegs(evt.tid);
+    this->predator->ThreadRefresh();
 
     if (child_thread_sigtrap_is_syscall(evt.status)) {
         LOG_ERROR(Debug, "untested: child_thread_sigtrap_is_syscall");
-        LOG_INFO(Debug, "[*!] SIGTRAP (SYSCALL): {}", evt.tid);
+        LOG_INFO(Debug, "[*!] SIGTRAP (SYSCALL): {} ({})", evt.tid, thread_in_question->name);
         std::string thread_stop_sigtrap_syscall_notification =
             std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
         if (!this->SendMessage(thread_stop_sigtrap_syscall_notification))
@@ -159,13 +161,16 @@ void GdbStub::LoopTrace(void) {
     }
 
     if (stop_reason == SIGSTOP) {
-        LOG_INFO(Debug, "[*!] SIGSTOP: {}", evt.tid);
-        if (thread_state_t* _ = predator->FindThread(evt.tid); _ == nullptr) {
+        if (thread_in_question == nullptr) {
+            LOG_WARNING(Debug, "[*!] {} SIGSTOP-ped earlier than its parent after clone()",
+                        evt.tid);
             // *likely* a child that raised SIGSTOP faster than parent could emit an event
             // push it back and hope it will get resolved by itself
             listener->Place(evt);
             return;
         }
+
+        LOG_INFO(Debug, "[*!] SIGSTOP: {} ({})", evt.tid, thread_in_question->name);
 
         std::string thread_stop_sigstop_notification =
             std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
@@ -190,13 +195,14 @@ void GdbStub::LoopTrace(void) {
         if (child_thread_evt_clone(evt.status)) {
             unsigned long new_tid = 0;
             ptrace(PTRACE_GETEVENTMSG, evt.tid, 0, &new_tid);
-            LOG_INFO(Debug, "[*+] SIGTRAP EVENT: {} created new thread: {}", evt.tid, new_tid);
+            LOG_INFO(Debug, "[*+] SIGTRAP EVENT: {} ({}) created new thread: {}", evt.tid,
+                     thread_in_question->name, new_tid);
 
             // we have to wait for the spawned thread *first* because it emits SIGSTOP
             // and it may or may not happen *before* parent thread stops
             thread_event_t clone_evt = listener->Wait();
-            this->predator->ChildThreadInterruptAll();
 
+            this->predator->ChildThreadInterruptAll();
             this->predator->ThreadRegister(clone_evt.tid, SIGSTOP);
 
             thread_evt_notification =
@@ -213,7 +219,8 @@ void GdbStub::LoopTrace(void) {
             bp_regs->rip = bp_rip;
             ptrace(PTRACE_SETREGS, evt.tid, 0, bp_regs);
 
-            LOG_INFO(Debug, "[*!] SIGTRAP: {} caught a breakpoint at 0x{:x}", evt.tid, bp_rip);
+            LOG_INFO(Debug, "[*!] SIGTRAP: {} ({}) caught a breakpoint at 0x{:x}", evt.tid,
+                     thread_in_question->name, bp_rip);
 
             // Find if it was our breakpoint
             if (BreakpointFind_SW(bp_rip) == nullptr)
@@ -225,7 +232,8 @@ void GdbStub::LoopTrace(void) {
         }
 
         if (child_thread_evt_exit(evt.status)) {
-            LOG_INFO(Debug, "[*-] SIGTRAP EVENT: {} exits with status {}", evt.tid, evt.status);
+            LOG_INFO(Debug, "[*-] SIGTRAP EVENT: {} ({}) exits with status {}", evt.tid,
+                     thread_in_question->name, evt.status);
 
             // data is available to read, but there's no guarantee the thread itself is there
             thread_evt_notification = std::format("w{:x};{:x}", evt.status, evt.tid);
@@ -486,7 +494,6 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         if (subcmd == 'g') {
             this->predator->DumpRegs(this->predator->GetTargetRegDump());
         }
-
 
         return OK;
     }
