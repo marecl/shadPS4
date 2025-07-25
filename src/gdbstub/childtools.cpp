@@ -65,14 +65,14 @@ bool Predator::ChildThreadContinue(ThreadID target, int signal,
     // only because (ask devs why the game throws segfaults)
     // TODO: DON'T
     if (!just_shut_the_fuck_up_about_the_segfaults_please)
-        LOG_ERROR(Debug, "[**] Continuing thread {} with signal {}", target, signal);
+        LOG_INFO(Debug, "[**] Continuing thread {} with signal {}", target, signal);
 
     thread_state_t* thread = this->FindThread(target);
 
     if (thread == nullptr) {
         // Unknown thread, very possible that a child caught SIGSTOP before
         // parent thread could raise an event
-        LOG_ERROR(Debug, "[!] Surprise motherfucker {}", target);
+        LOG_ERROR(Debug, "[!] Rogue thread {}", target);
         ptrace(PTRACE_CONT, target, NULL, signal);
         return true;
     }
@@ -93,7 +93,7 @@ bool Predator::ChildThreadContinue(ThreadID target, int signal,
 
 bool Predator::ChildThreadContinueAll(int signal) {
     bool was_error = false;
-    LOG_ERROR(Debug, "[**] Continuing all threads with signal {}", signal);
+    LOG_INFO(Debug, "[**] Continuing all threads with signal {}", signal);
     for (auto& [tid, state] : this->threads) {
         // LOG_ERROR(Debug, "[+++] Continuing child {}", tid);
 
@@ -170,7 +170,7 @@ bool Predator::ChildThreadInterruptAll(void) {
     thread_event_t evt{};
     bool all_stopped = false;
 
-    LOG_INFO(Debug, "Interrupting {} thread(s)", target_threads.size());
+    LOG_INFO(Debug, "Interrupting all available ({}) thread(s)", target_threads.size());
     while (!target_threads.empty()) {
         if (!listener->Poll(evt))
             continue;

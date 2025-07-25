@@ -40,7 +40,7 @@ s8 GdbStub::LoopCommand(void) {
 
     // Catch the first connection from GDB
     if (!this->client_connected) {
-        LOG_INFO(Debug, "Received a connection from GDB. Interrupting all threads...");
+        LOG_INFO(Debug, "Received a connection from GDB");
         this->predator->ChildThreadInterruptAll();
         this->client_connected = true;
     }
@@ -101,7 +101,7 @@ s8 GdbStub::LoopCommand(void) {
             this->SendMessage(OK);
             this->stub_server->RestartSession();
             this->client_connected = false;
-            LOG_INFO(Debug, "Client GDB detached itself. Continuing execution...");
+            LOG_INFO(Debug, "Client GDB detached itself");
             this->predator->ChildThreadContinueAll();
             return 1;
         }
@@ -127,14 +127,16 @@ bool GdbStub::LoopTrace(void) {
 
         std::string thread_exit_notification =
             std::format("W{:02x};process:{:x};", child_thread_exit_reason(evt.status), evt.tid);
-        if (!this->SendMessage(thread_exit_notification))
-            predator->ChildThreadContinue(evt.tid);
+        this->SendMessage(thread_exit_notification);
+
+        predator->ThreadRemove(evt.tid);
+        predator->ChildThreadContinueAll();
 
         return 1;
     }
 
     if (child_thread_killed(evt.status)) {
-        LOG_ERROR(Debug, "stub");
+        LOG_ERROR(Debug, "untested: child_thread_killed");
         LOG_INFO(Debug, "[__] KILL?: {} was killed with {:02}", evt.tid,
                  child_thread_kill_reason(evt.status));
         // There's no packet to signal thread being *killed*
@@ -152,7 +154,7 @@ bool GdbStub::LoopTrace(void) {
     }
 
     if (child_thread_sigtrap_is_syscall(evt.status)) {
-        LOG_ERROR(Debug, "stub");
+        LOG_ERROR(Debug, "untested: child_thread_sigtrap_is_syscall");
         LOG_INFO(Debug, "[*!] SIGTRAP (SYSCALL): {}", evt.tid);
         std::string thread_stop_sigtrap_syscall_notification =
             std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
@@ -223,14 +225,13 @@ bool GdbStub::LoopTrace(void) {
 
         if (child_thread_evt_exit(evt.status)) {
             LOG_INFO(Debug, "[*-] SIGTRAP EVENT: {} exits with status {}", evt.tid, evt.status);
+            this->predator->ChildThreadInterruptAll(); // GDB expects everything to stop
 
             // data is available to read, but there's no guarantee the thread itself is there
             std::string thread_evt_exit_notification =
                 std::format("w{:x};{:x}", evt.status, evt.tid);
             if (!this->SendMessage(thread_evt_exit_notification))
                 this->predator->ChildThreadContinue(evt.tid); // or continue all, idk yet
-
-            predator->ThreadRemove(evt.tid);
 
             return 1;
         }
@@ -265,6 +266,7 @@ bool GdbStub::LoopTrace(void) {
         LOG_ERROR(Debug, "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)", evt.tid,
                   info.si_code, predator->user_regs.rip, predator->user_regs.rip - 0x7FF000000);
 
+        LOG_ERROR(Debug, "untested: stop_reason==SIGSEGV other than SEGV_ACCERR");
         std::string thread_sigsegv_notification =
             std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
         if (!this->SendMessage(thread_sigsegv_notification)) {
@@ -329,13 +331,13 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             return E01;
 
         if (target->running) {
-            LOG_ERROR(Debug, "Child threads didn't stop on GDB attach");
+            LOG_ERROR(Debug, "Child threads didn't stop on GDB attaching");
             return E01;
         }
 
-        // in this case signal always means stop, so we can ignore possibility of SIGCONT
         return std::format("T{:02x}", target->signal);
     }
+
     if (maincmd == 'D') {
         return DETACH;
     }
@@ -374,7 +376,6 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'm') {
-        LOG_WARNING(Debug, "Stub. May crash on backtrace in gdb. Check boundaries and stuff");
         u8 sepidx = cmd.arg.find(',');
         u64 addr = std::stoull(cmd.arg.substr(0, sepidx), nullptr, 16);
         u64 len = std::stoull(cmd.arg.substr(sepidx + 1), nullptr, 16);
@@ -384,6 +385,26 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             return E01;
         }
         return mem;
+    }
+
+    if (maincmd == 'M') {
+        u8 comma_idx = cmd.arg.find(',');
+        u64 addr = std::stoull(cmd.arg.substr(0, comma_idx), nullptr, 16);
+        u64 len = std::stoull(cmd.arg.substr(comma_idx + 1), nullptr, 16);
+        u8 semicolon_idx = cmd.arg.find(':');
+        std::string data_str = cmd.arg.substr(semicolon_idx + 1);
+
+        std::vector<u8> data_u8{};
+        // we ASSUME received length is even
+        for (u32 idx = 0; idx < data_str.length(); idx += 2) {
+            u8 _tmp{};
+            sscanf(data_str.substr(idx, 2).c_str(), "%hhx", &_tmp);
+            data_u8.insert(data_u8.begin(), _tmp);
+        }
+
+        LOG_INFO(Debug, "GDB M packet write to address 0x{:x} length {} data ", addr, len,
+                 data_str);
+        return WriteMemory(addr, len, data_u8) ? OK : E01;
     }
 
     if (maincmd == 'g') {
@@ -457,35 +478,32 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         if (subcmd == 'g') {
             threadActionTarget = &this->predator->thread_sel_reg_dump;
         }
+
         if (subcmd == 'c') {
             threadActionTarget = &this->predator->thread_sel_flow;
         }
 
-        if (threadActionTarget != nullptr) {
-            if (ttid == 0) {
-                *threadActionTarget = this->predator->main_thread;
-                LOG_WARNING(Debug, "GDB H[{}] packet -> selected main thread ({})", subcmd,
-                            *threadActionTarget);
-            } else if (ttid == -1) {
-                LOG_WARNING(Debug, "GDB H[{}] packet -> all threads", subcmd);
-                *threadActionTarget = -1;
-            } else if (this->predator->FindThread(ttid) != nullptr) {
-                LOG_WARNING(Debug, "GDB H[{}] packet -> selected thread {}", subcmd, ttid);
-                *threadActionTarget = ttid;
-            } else {
-                LOG_ERROR(Debug, "GDB H[{}] requested nonexistent thread {}", subcmd, ttid);
-                return E01;
-            }
-
-            // GDB doesn't always call 'g' after changing target thread
-            if (subcmd == 'g') {
-                this->predator->DumpRegs(this->predator->GetTargetRegDump());
-            }
-
-            return OK;
+        if (threadActionTarget == nullptr) {
+            LOG_ERROR(Debug, "Cannot parse argument for H packet");
+            return E01;
         }
-        LOG_ERROR(Debug, "Cannot parse argument for H packet");
-        return E01;
+
+        if (ttid == 0) {
+            *threadActionTarget = this->predator->main_thread;
+            LOG_WARNING(Debug, "GDB H[{}] packet -> selected main thread ({})", subcmd,
+                        *threadActionTarget);
+        } else if (ttid == -1) {
+            LOG_WARNING(Debug, "GDB H[{}] packet -> all threads", subcmd);
+            *threadActionTarget = -1;
+        } else if (this->predator->FindThread(ttid) != nullptr) {
+            LOG_WARNING(Debug, "GDB H[{}] packet -> selected thread {}", subcmd, ttid);
+            *threadActionTarget = ttid;
+        } else {
+            LOG_ERROR(Debug, "GDB H[{}] requested nonexistent thread {}", subcmd, ttid);
+            return E01;
+        }
+
+        return OK;
     }
 
     if (maincmd == 'v') {
@@ -646,6 +664,12 @@ std::string GdbStub::PrintRegisters(const struct user_regs_struct* regs,
     return out;
 }
 
+/**
+ * ptrace PEEK/POKE address **must** be word-aligned (i.e. every 8 bytes).
+ * Advancing in single bytes is meeeeh, works for reading (just get the left/right-most one,
+ * i forgot already). Writing needs exact placement.
+ */
+
 bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) {
     const auto mem = Core::Memory::Instance();
     if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
@@ -655,11 +679,56 @@ bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) 
 
     thread_state_t* mainthread = this->predator->FindThread(0);
 
-    for (u64 i = 0; i < length; ++i) {
-        // peekdata and peektext are equivalent
-        u32 d = ptrace(PTRACE_PEEKDATA, mainthread->tid, address + i, NULL);
-        d = d & 0xFF;
+    /**
+     * Yeah, it's not like we care about speed (yet)
+     */
+
+    // length = bytes
+    u64 addr_end = address + length;
+    u32 byte_idx{};
+    u64 addr_aligned{};
+
+    for (u64 curaddr = address; curaddr < addr_end; curaddr++) {
+        addr_aligned = curaddr & (~0x07);
+        byte_idx = curaddr & 0x07;
+
+        u64 d = ptrace(PTRACE_PEEKDATA, mainthread->tid, addr_aligned, NULL);
+        d = (d >> (8 * byte_idx)) & 0xFF;
         *out = fmt::format("{:02x}", d) + *out;
+    }
+
+    return true;
+}
+
+bool GdbStub::WriteMemory(const u64 address, const u64 length, std::vector<u8> data) {
+    const auto mem = Core::Memory::Instance();
+    if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
+        LOG_ERROR(Debug, "Invalid memory region: 0x{:x}", address);
+        return false;
+    }
+
+    thread_state_t* mainthread = this->predator->FindThread(0);
+
+    // length = bytes
+    u64 addr_end = address + length;
+    u64 byte_idx{};
+    u64 addr_aligned{};
+    u64 ff = 0xFF;
+
+    u32 data_idx = 0;
+    for (u64 curaddr = address; curaddr < addr_end; curaddr++) {
+        u64 pending = data[data_idx];
+        addr_aligned = curaddr & (~0x07);
+        byte_idx = curaddr & 0x07;
+
+        u64 c = ptrace(PTRACE_PEEKDATA, mainthread->tid, addr_aligned, NULL);
+        u64 d = c & ~(ff << (8 * byte_idx));
+        LOG_ERROR(Debug, "{:x} {:x}", c, d);
+        d = d | (pending << (8 * byte_idx));
+        LOG_ERROR(Debug, "{:x} ({:x} + {:x}) : {:x} -> {:x}", curaddr, addr_aligned, byte_idx, c,
+                  d);
+        ptrace(PTRACE_POKEDATA, mainthread->tid, addr_aligned, d);
+        ++data_idx;
     }
 
     return true;

@@ -37,6 +37,8 @@ public:
     std::string PrintRegisters(const struct user_regs_struct* regs,
                                const struct user_fpregs_struct* fpregs);
     bool ReadMemory(const u64 address, const u64 length, std::string* out);
+    bool WriteMemory(const u64 address, const u64 length,std::vector<u8> data);
+
     // ...
     void End(int code);
 
