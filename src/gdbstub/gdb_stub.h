@@ -28,7 +28,7 @@ public:
     ~GdbStub() {};
 
     s8 LoopCommand(void);
-    bool LoopTrace(void);
+    void LoopTrace(void);
     s8 HandleContinuous(GdbCommand cmd);
     std::string HandlePacket(GdbCommand cmd);
 
