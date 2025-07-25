@@ -17,6 +17,7 @@
 #include "common/logging/backend.h"
 #include "common/logging/log.h"
 #include "gdb_stub.h"
+#include "src/core/address_space.h"
 #include "src/core/memory.h"
 #include "stubtools.h"
 #include "threadinfo.h"
@@ -121,7 +122,7 @@ bool GdbStub::LoopTrace(void) {
         return 1;
 
     if (child_thread_exited(evt.status)) {
-        LOG_INFO(Debug, "[--] Thread {} exited with code {:02}", evt.tid,
+        LOG_INFO(Debug, "[--] EXIT: {} exited with code {:02}", evt.tid,
                  child_thread_exit_reason(evt.status));
 
         std::string thread_exit_notification =
@@ -134,7 +135,7 @@ bool GdbStub::LoopTrace(void) {
 
     if (child_thread_killed(evt.status)) {
         LOG_ERROR(Debug, "stub");
-        LOG_INFO(Debug, "[__] Thread {} was killed with {:02}", evt.tid,
+        LOG_INFO(Debug, "[__] KILL?: {} was killed with {:02}", evt.tid,
                  child_thread_kill_reason(evt.status));
         // There's no packet to signal thread being *killed*
         return 1;
@@ -152,7 +153,7 @@ bool GdbStub::LoopTrace(void) {
 
     if (child_thread_sigtrap_is_syscall(evt.status)) {
         LOG_ERROR(Debug, "stub");
-        LOG_INFO(Debug, "[*!] Thread {} got SYSCALL SIGTRAP", evt.tid);
+        LOG_INFO(Debug, "[*!] SIGTRAP (SYSCALL): {}", evt.tid);
         std::string thread_stop_sigtrap_syscall_notification =
             std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
         if (!this->SendMessage(thread_stop_sigtrap_syscall_notification))
@@ -160,7 +161,7 @@ bool GdbStub::LoopTrace(void) {
     }
 
     if (stop_reason == SIGSTOP) {
-        LOG_INFO(Debug, "[*!] Thread {} got SIGSTOP", evt.tid);
+        LOG_INFO(Debug, "[*!] SIGSTOP: {}", evt.tid);
         if (thread_state_t* _ = predator->FindThread(evt.tid); _ == nullptr) {
             // *likely* a child that raised SIGSTOP faster than parent could emit an event
             // push it back and hope it will get resolved by itself
@@ -177,17 +178,31 @@ bool GdbStub::LoopTrace(void) {
 
     if (stop_reason == SIGCONT) {
         // Shouldn't happen anyway
-        LOG_INFO(Debug, "[**] Thread {} continuing", evt.tid);
+        LOG_INFO(Debug, "[**] SIGCONT: {}", evt.tid);
         return 1;
     }
 
     if (stop_reason == SIGTRAP) {
-        LOG_INFO(Debug, "[*!] Thread {} got SIGTRAP", evt.tid);
+
+        if (child_thread_evt_none(evt.status)) {
+            LOG_INFO(Debug, "[*!] SIGTRAP: {} caught a breakpoint", evt.tid);
+
+            // GDB expects the SIGTRAPped thread to be selected for reg dump immediately
+            predator->ChildThreadInterruptAll();
+            this->predator->thread_sel_reg_dump = evt.tid;
+
+            std::string thread_evt_notification =
+                std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
+            if (!this->SendMessage(thread_evt_notification))
+                this->predator->ChildThreadContinueAll();
+
+            return 1;
+        }
 
         if (child_thread_evt_clone(evt.status)) {
             unsigned long new_tid = 0;
             ptrace(PTRACE_GETEVENTMSG, evt.tid, nullptr, &new_tid);
-            LOG_INFO(Debug, "[*+] New thread/process: {}", new_tid);
+            LOG_INFO(Debug, "[*+] SIGTRAP EVENT: {} created new thread: {}", evt.tid, new_tid);
 
             // if ptrace_o_traceclone is used, new thread will raise sigstop on its own
             thread_event_t clone_evt = listener->Wait();
@@ -206,37 +221,33 @@ bool GdbStub::LoopTrace(void) {
             return 1;
         }
 
-        if (child_thread_evt_fork(evt.status)) {
-            LOG_ERROR(Debug, "child_thread_evt_fork");
-        }
-
-        if (child_thread_evt_execve(evt.status)) {
-            LOG_ERROR(
-                Debug,
-                "child_thread_evt_execve -> may need to re-set the PTRACE_O_TRACEEXEC option");
-        }
-
         if (child_thread_evt_exit(evt.status)) {
-            LOG_INFO(Debug, "[*-] Thread {} exits with status {}", evt.tid, evt.status);
+            LOG_INFO(Debug, "[*-] SIGTRAP EVENT: {} exits with status {}", evt.tid, evt.status);
 
             // data is available to read, but there's no guarantee the thread itself is there
             std::string thread_evt_exit_notification =
-                std::format("T{:02x}thread:{:x};", evt.status, evt.tid);
+                std::format("w{:x};{:x}", evt.status, evt.tid);
             if (!this->SendMessage(thread_evt_exit_notification))
                 this->predator->ChildThreadContinue(evt.tid); // or continue all, idk yet
+
+            predator->ThreadRemove(evt.tid);
 
             return 1;
         }
 
-        // unhandled event
-        LOG_ERROR(Debug, "stub. unknown and unhandled event");
-        std::string thread_evt_notification =
-            std::format("T{:02x}thread:{:x};", evt.status, evt.tid);
-        if (!this->SendMessage(thread_evt_notification))
-            this->predator->ChildThreadContinue(evt.tid); // or continue all, idk yet
+        if (child_thread_evt_fork(evt.status)) {
+            LOG_ERROR(Debug, "SIGTRAP EVENT: [not implemented] child_thread_evt_fork");
+        }
 
-        //  predator.ChildThreadContinue(evt.tid);
-        return -1; // unknown other event
+        if (child_thread_evt_execve(evt.status)) {
+            // may need to re-set the PTRACE_O_TRACEEXEC option
+            LOG_ERROR(Debug, "SIGTRAP EVENT: [not implemented] child_thread_evt_execve");
+        }
+
+        // unhandled event
+        LOG_ERROR(Debug, "unknown and unhandled event. status: {}", evt.status);
+        LOG_ERROR(Debug, "program may hang here. i don't care.");
+        return 1; // unknown other event
     }
 
     if (stop_reason == SIGSEGV) {
@@ -376,7 +387,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'g') {
-        // apparently regs must be ready by now
+        this->predator->DumpRegs(this->predator->GetTargetRegDump());
         return PrintRegisters(&this->predator->user_regs, &this->predator->user_fpregs);
     }
 
@@ -403,9 +414,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'p') {
-        if (this->predator->user_regs_dirty) {
-            this->predator->DumpRegs(this->predator->GetTargetRegDump());
-        }
+        this->predator->DumpRegs(this->predator->GetTargetRegDump());
         u16 targetReg = std::stol(cmd.arg, nullptr, 16);
 
         switch (targetReg) {
@@ -638,25 +647,19 @@ std::string GdbStub::PrintRegisters(const struct user_regs_struct* regs,
 }
 
 bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) {
-    //    const auto mem = Core::Memory::Instance();
-
-    //  if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
-    //      return false;
-    // }
-    if (address < 0x1000000)
+    const auto mem = Core::Memory::Instance();
+    if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
+        LOG_ERROR(Debug, "Invalid memory region: 0x{:x}", address);
         return false;
-    if (address > 0x8ffec07dbd60)
-        return false;
+    }
 
     thread_state_t* mainthread = this->predator->FindThread(0);
 
     for (u64 i = 0; i < length; ++i) {
         // peekdata and peektext are equivalent
-        u64 d = ptrace(PTRACE_PEEKDATA, mainthread->tid, address + i, NULL);
-        LOG_ERROR(Debug, "{:x} -> {:x}", address, d);
-        for (s8 off = 54; off >= 0; off -= 8) {
-            *out += fmt::format("{:02x}", (d >> off));
-        }
+        u32 d = ptrace(PTRACE_PEEKDATA, mainthread->tid, address + i, NULL);
+        d = d & 0xFF;
+        *out = fmt::format("{:02x}", d) + *out;
     }
 
     return true;

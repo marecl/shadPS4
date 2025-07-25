@@ -21,7 +21,6 @@
 #endif
 
 int MainReal(int argc, char* argv[]) {
-    raise(SIGSTOP);
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
 #endif

@@ -60,7 +60,6 @@ void Predator::ThreadRegister(ThreadID target, int signal) {
 
 bool Predator::ChildThreadContinue(ThreadID target, int signal,
                                    bool just_shut_the_fuck_up_about_the_segfaults_please) {
-    this->RegDumpInvalidate();
 
     // this will throw a lot of lines into terminal
     // only because (ask devs why the game throws segfaults)
@@ -93,8 +92,6 @@ bool Predator::ChildThreadContinue(ThreadID target, int signal,
 }
 
 bool Predator::ChildThreadContinueAll(int signal) {
-    this->RegDumpInvalidate();
-
     bool was_error = false;
     LOG_ERROR(Debug, "[**] Continuing all threads with signal {}", signal);
     for (auto& [tid, state] : this->threads) {
@@ -221,7 +218,6 @@ bool Predator::DumpRegs(ThreadID target) {
         LOG_ERROR(Debug, "rtyrtyrty");
         return false;
     }
-    this->user_regs_dirty = false;
 
     return true;
 }
@@ -266,10 +262,6 @@ void Predator::ThreadRefresh(void) {
     }
 }
 
-void Predator::RegDumpInvalidate(void) {
-    this->user_regs_dirty = true;
-}
-
 /// @brief Find thread ID in tracked threads
 /// @param target ThreadID
 /// @return main thread for 0 and -1, target for any other. or nullptr if not found
@@ -305,6 +297,10 @@ int child_thread_kill_reason(int status) {
     return WTERMSIG(status);
 }
 
+bool child_thread_evt_none(int status) {
+    return status >> 8 == (SIGTRAP);
+}
+
 bool child_thread_evt_clone(int status) {
     return status >> 8 == (SIGTRAP | (PTRACE_EVENT_CLONE << 8));
 }
@@ -315,6 +311,10 @@ bool child_thread_evt_exit(int status) {
 
 bool child_thread_evt_fork(int status) {
     return status >> 8 == (SIGTRAP | (PTRACE_EVENT_FORK << 8));
+}
+
+bool child_thread_evt_execve(int status) {
+    return status >> 8 == (SIGTRAP | (PTRACE_EVENT_EXEC << 8));
 }
 
 bool child_thread_sigtrap_is_syscall(int status) {

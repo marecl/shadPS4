@@ -23,16 +23,21 @@
 #include "gdbstub/ptrace_listener.h"
 #include "gdbstub/threadinfo.h"
 
+#define XD
+
 int main(int argc, char* argv[]) {
+#ifdef XD
     ThreadID parent_pid = getpid();
     ThreadID child_pid = fork();
 
     if (child_pid == 0) {
         prctl(PR_SET_PDEATHSIG, SIGTERM);
+        raise(SIGSTOP);
+#endif
         auto ret = MainReal(argc, argv);
         std::cout << "Child exited\n";
         exit(ret);
-
+#ifdef XD
     } else if (child_pid > 0) {
         prctl(PR_SET_NAME, "shaddebug", 0, 0);
 
@@ -119,6 +124,7 @@ int main(int argc, char* argv[]) {
     } else { ///< if (child_pid > 0)
         std::cout << "Fork error\n";
     }
+#endif
     std::cout << "Fin\n";
     return 0;
 }

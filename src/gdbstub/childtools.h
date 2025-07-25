@@ -63,12 +63,6 @@ public:
 
     // Misc
 
-    /**
-     * Mark latest register dump as dirty, i.e. they weren't
-     * dumped after changing target thread or continuing execution.
-     */
-    void RegDumpInvalidate(void);
-
     ThreadID GetTargetRegDump(void) {
         if (this->thread_sel_reg_dump == -1)
             return this->main_thread;
@@ -104,7 +98,6 @@ public:
     const ThreadID main_thread = -1;
     ThreadID thread_sel_reg_dump = 0;        ///< selected for g-action
     ThreadID thread_sel_flow = -1;           ///< selected for s/c/t action
-    bool user_regs_dirty{true};              ///< thread changed, true if regs weren't updated
     struct user_regs_struct user_regs{};     ///< latest thread regs dump
     struct user_fpregs_struct user_fpregs{}; ///< latest thread floating point regs dump
 };
@@ -120,6 +113,7 @@ bool child_thread_evt_clone(int status);
 bool child_thread_evt_exit(int status);
 bool child_thread_evt_fork(int status);
 bool child_thread_evt_execve(int status);
+bool child_thread_evt_none(int status); // just sigtrap, no event
 bool child_thread_sigtrap_is_syscall(int status);
 
 #endif // CHILDTOOLS_H
