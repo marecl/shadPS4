@@ -6,16 +6,16 @@
 
 #include <iostream>
 #include <thread>
+#include <unordered_map>
 
 #include <sys/user.h>
 
 #include "childtools.h"
 #include "common/types.h"
+#include "gdb_command.h"
 #include "gdb_server.h"
 #include "ptrace_listener.h"
 #include "threadinfo.h"
-
-#include "gdb_command.h"
 
 // Show received/sent data. It's a lot and may obfuscate the rest of the program
 #define DEBUG_COMM
@@ -36,15 +36,16 @@ public:
     std::string ThreadList(void);
     std::string PrintRegisters(const struct user_regs_struct* regs,
                                const struct user_fpregs_struct* fpregs);
-    bool ReadMemory(const u64 address, const u64 length, std::string* out);
-    bool WriteMemory(const u64 address, const u64 length,std::vector<u8> data);
 
     // ...
     void End(int code);
 
 private:
     bool SendMessage(std::string message, bool raw_and_mute = false);
-    void handle_packet_vCont(std::string arg);
+    void handle_packet_vCont(GdbCommand cmd);
+    std::string handle_packet_z(GdbCommand cmd);
+
+    std::unordered_map<u64, u8> breakpoints_sw{};
 
     bool client_connected{};
     Predator* predator{};

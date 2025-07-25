@@ -12,13 +12,12 @@
 #include <sys/user.h>
 #include <sys/wait.h>
 
+#include "breakpoint.h"
 #include "childtools.h"
 #include "common/debug.h"
 #include "common/logging/backend.h"
 #include "common/logging/log.h"
 #include "gdb_stub.h"
-#include "src/core/address_space.h"
-#include "src/core/memory.h"
 #include "stubtools.h"
 #include "threadinfo.h"
 
@@ -146,6 +145,10 @@ void GdbStub::LoopTrace(void) {
         predator->UpdateRunningState(*thr, stop_reason);
     }
 
+    // GDB probably expects regs to be dumped from the calling thread,
+    // since the target stopped by itself
+    this->predator->DumpRegs(evt.tid);
+
     if (child_thread_sigtrap_is_syscall(evt.status)) {
         LOG_ERROR(Debug, "untested: child_thread_sigtrap_is_syscall");
         LOG_INFO(Debug, "[*!] SIGTRAP (SYSCALL): {}", evt.tid);
@@ -179,13 +182,14 @@ void GdbStub::LoopTrace(void) {
 
     if (stop_reason == SIGTRAP) {
         std::string thread_evt_notification{};
+
         // why can't we just stop them all here? (see: evt_clone)
         // also, DON'T MOVE THAT LOWER
         // so far its the only edge case, where threads can't be stopped immediately after entering
 
         if (child_thread_evt_clone(evt.status)) {
             unsigned long new_tid = 0;
-            ptrace(PTRACE_GETEVENTMSG, evt.tid, nullptr, &new_tid);
+            ptrace(PTRACE_GETEVENTMSG, evt.tid, 0, &new_tid);
             LOG_INFO(Debug, "[*+] SIGTRAP EVENT: {} created new thread: {}", evt.tid, new_tid);
 
             // we have to wait for the spawned thread *first* because it emits SIGSTOP
@@ -201,11 +205,23 @@ void GdbStub::LoopTrace(void) {
             this->predator->ChildThreadInterruptAll();
 
         if (child_thread_evt_none(evt.status)) {
-            LOG_INFO(Debug, "[*!] SIGTRAP: {} caught a breakpoint", evt.tid);
+            // Upon stopping at 0xCC RIP already points to the next address
+            // It's stub's responsibility to correct that
+            struct user_regs_struct* bp_regs = &this->predator->user_regs;
 
-            // GDB expects the SIGTRAPped thread to be selected for reg dump immediately
-            this->predator->thread_sel_reg_dump = evt.tid;
-            thread_evt_notification = std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
+            auto bp_rip = bp_regs->rip - 1;
+            bp_regs->rip = bp_rip;
+            ptrace(PTRACE_SETREGS, evt.tid, 0, bp_regs);
+
+            LOG_INFO(Debug, "[*!] SIGTRAP: {} caught a breakpoint at 0x{:x}", evt.tid, bp_rip);
+
+            // Find if it was our breakpoint
+            if (BreakpointFind_SW(bp_rip) == nullptr)
+                LOG_ERROR(Debug, "Breakpoint was not created by user");
+
+            // We also assume SIGTRAP will occur *only* on sw breakpoints
+            thread_evt_notification =
+                std::format("T{:02x}thread:{:x};swbreak:;", stop_reason, evt.tid);
         }
 
         if (child_thread_evt_exit(evt.status)) {
@@ -301,7 +317,7 @@ s8 GdbStub::HandleContinuous(GdbCommand cmd) {
     }*/
 
     if (cmd.cmd == "vCont") {
-        handle_packet_vCont(cmd.arg);
+        handle_packet_vCont(cmd);
         return 1;
     }
 
@@ -360,6 +376,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             predator->ChildThreadInterrupt(target_thread->tid);
         }
 
+        this->predator->DumpRegs(this->predator->GetTargetRegDump());
         return std::format("T{:02x}thread:{:x};", target_thread->signal, target_thread->tid);
     }
 
@@ -368,11 +385,11 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         u64 addr = std::stoull(cmd.arg.substr(0, sepidx), nullptr, 16);
         u64 len = std::stoull(cmd.arg.substr(sepidx + 1), nullptr, 16);
         LOG_INFO(Debug, "GDB m packet read from address 0x{:x} length {}", addr, len);
-        std::string mem{};
-        if (!ReadMemory(addr, len, &mem)) {
+        std::vector<u8> mem{};
+        if (!ReadMemory(this->predator->main_thread, addr, len, mem)) {
             return E01;
         }
-        return mem;
+        return BytesToString(mem);
     }
 
     if (maincmd == 'M') {
@@ -382,48 +399,23 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         u8 semicolon_idx = cmd.arg.find(':');
         std::string data_str = cmd.arg.substr(semicolon_idx + 1);
 
-        std::vector<u8> data_u8{};
-        // we ASSUME received length is even
-        for (u32 idx = 0; idx < data_str.length(); idx += 2) {
-            u8 _tmp{};
-            sscanf(data_str.substr(idx, 2).c_str(), "%hhx", &_tmp);
-            data_u8.insert(data_u8.begin(), _tmp);
-        }
-
         LOG_INFO(Debug, "GDB M packet write to address 0x{:x} length {} data ", addr, len,
                  data_str);
-        return WriteMemory(addr, len, data_u8) ? OK : E01;
+
+        bool ret = WriteMemory(this->predator->main_thread, addr, len, StringToBytes(data_str));
+        return ret ? OK : E01;
     }
 
     if (maincmd == 'g') {
-        this->predator->DumpRegs(this->predator->GetTargetRegDump());
+        // should be dumped by 'Hg', '\03' or trace handler (if stopped)
         return PrintRegisters(&this->predator->user_regs, &this->predator->user_fpregs);
     }
 
-    if (maincmd == 'Z') {
-        LOG_ERROR(Debug, "Stub");
-        if (cmd.cmd[1] == '0') {
-            std::vector<std::string> parts = Split(cmd.arg, ',');
-            std::string addr = parts[1];
-            std::string length = parts[2];
-            size_t _addr = std::strtoull(addr.c_str(), nullptr, 16);
-            size_t _length = std::strtoull(addr.c_str(), nullptr, 16);
-
-            LOG_INFO(Debug, "Breakpoint requested at 0x{:x} len:{}", _addr, _length);
-
-            thread_state_t* mainthread = this->predator->FindThread(0);
-
-            static unsigned long orig_instr = ptrace(PTRACE_PEEKDATA, mainthread->tid, _addr, NULL);
-
-            long new_instr = (orig_instr & (~0xFF)) | 0xCC;
-            if (ptrace(PTRACE_POKEDATA, mainthread->tid, _addr, new_instr) == -1) {
-                LOG_ERROR(Debug, "Unable to insert breakpoint");
-            }
-        }
-    }
+    if (maincmd == 'z' || maincmd == 'Z')
+        return handle_packet_z(cmd);
 
     if (maincmd == 'p') {
-        this->predator->DumpRegs(this->predator->GetTargetRegDump());
+        // same as 'g'
         u16 targetReg = std::stol(cmd.arg, nullptr, 16);
 
         switch (targetReg) {
@@ -491,6 +483,11 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             return E01;
         }
 
+        if (subcmd == 'g') {
+            this->predator->DumpRegs(this->predator->GetTargetRegDump());
+        }
+
+
         return OK;
     }
 
@@ -500,9 +497,8 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             return "";
         }
         if (cmd.cmd == "vCont?") {
-            // cCt MUST be
             // return "vCont;c;C;s;S;t";
-            return "vCont;c;C"; // step and stop not supported
+            return "vCont;c;C;s;S"; // stop not supported (yet)
         }
         return "";
     }
@@ -527,13 +523,15 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         if (cmd.cmd == "qSupported") {
             //  - probably necessary in the near future
             // binary-upload+ - unnecessary for now, maybe ever
-            std::string resp = "PacketSize=1024;multiprocess-;qXfer:threads:read+;QThreadEvents+";
+            std::string resp =
+                "PacketSize=1024;multiprocess-;qXfer:threads:read+"; //;QThreadEvents+";
             // just in case i'm far enough to need breakpoints
             // vContSupported+ must be sent by gdb, otherwise no debugging
             if (resp.find("swbreak+"))
                 resp += ";swbreak+";
-            if (resp.find("hwbreak+"))
-                resp += ";hwbreak+";
+            // not just yet
+            // if (resp.find("hwbreak+"))
+            //     resp += ";hwbreak+";
             return resp;
         }
 
@@ -652,72 +650,6 @@ std::string GdbStub::PrintRegisters(const struct user_regs_struct* regs,
     return out;
 }
 
-/**
- * ptrace PEEK/POKE address **must** be word-aligned (i.e. every 8 bytes).
- * Advancing in single bytes is meeeeh, works for reading (just get the left/right-most one,
- * i forgot already). Writing needs exact placement.
- */
-
-bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) {
-    const auto mem = Core::Memory::Instance();
-    if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
-        LOG_ERROR(Debug, "Invalid memory region: 0x{:x}", address);
-        return false;
-    }
-
-    thread_state_t* mainthread = this->predator->FindThread(0);
-
-    /**
-     * Yeah, it's not like we care about speed (yet)
-     */
-
-    // length = bytes
-    u64 addr_end = address + length;
-    u8 byte_idx{};
-    u64 addr_aligned{};
-
-    for (u64 curaddr = address; curaddr < addr_end; curaddr++) {
-        addr_aligned = curaddr & (~0x07);
-        byte_idx = curaddr & 0x07;
-
-        u64 d = ptrace(PTRACE_PEEKDATA, mainthread->tid, addr_aligned, NULL);
-        d = (d >> (8 * byte_idx)) & 0xFF; // doesn't need a cast, it stays at u8 range
-        *out = fmt::format("{:02x}", d) + *out;
-    }
-
-    return true;
-}
-
-bool GdbStub::WriteMemory(const u64 address, const u64 length, std::vector<u8> data) {
-    const auto mem = Core::Memory::Instance();
-    if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
-        LOG_ERROR(Debug, "Invalid memory region: 0x{:x}", address);
-        return false;
-    }
-
-    thread_state_t* mainthread = this->predator->FindThread(0);
-
-    // length = bytes
-    u64 addr_end = address + length;
-    u8 byte_idx{};
-    u64 addr_aligned{};
-
-    u64 data_idx = 0;
-    for (u64 curaddr = address; curaddr < addr_end; curaddr++) {
-        addr_aligned = curaddr & (~0x07);
-        byte_idx = curaddr & 0x07;
-
-        u64 d = ptrace(PTRACE_PEEKDATA, mainthread->tid, addr_aligned, NULL);
-        // need casting, otherwise they are arbitrarily treated as u32
-        d = d & ~(static_cast<u64>(0xFF) << (8 * byte_idx));
-        d = d | (static_cast<u64>(data[data_idx]) << (8 * byte_idx));
-        ptrace(PTRACE_POKEDATA, mainthread->tid, addr_aligned, d);
-        ++data_idx;
-    }
-
-    return true;
-}
-
 bool GdbStub::SendMessage(std::string message, bool raw_and_mute) {
     if (!this->client_connected)
         return false;
@@ -735,7 +667,8 @@ bool GdbStub::SendMessage(std::string message, bool raw_and_mute) {
     return send_successful;
 }
 
-void GdbStub::handle_packet_vCont(std::string arg) {
+void GdbStub::handle_packet_vCont(GdbCommand cmd) {
+    std::string arg = cmd.arg;
     std::vector<std::string> targets = Split(arg, ';');
 
     // we assume that 1) one vCont doesn't mix c/s/t packets,
@@ -773,6 +706,74 @@ void GdbStub::handle_packet_vCont(std::string arg) {
             else
                 predator->ChildThreadContinue(target, signal);
             break;
+        case 'S':
+        case 's':
+            if (target == 0) {
+                LOG_ERROR(Debug, "Didn't know GDB can single-step everything at once :)))");
+                break;
+            }
+            ptrace(PTRACE_SINGLESTEP, target, 0, signal);
+            break;
         }
     }
+}
+
+std::string GdbStub::handle_packet_z(GdbCommand cmd) {
+
+    LOG_ERROR(Debug, "Stub");
+    char maincmd = cmd.cmd[0];
+    u8 arglen = cmd.arg.length() + 1;
+    char* tmp = new char[arglen]();
+    strncpy(tmp, cmd.arg.c_str(), arglen);
+
+    u16 kind = std::strtoul(std::strtok(tmp, ","), nullptr, 16);
+    u64 addr = std::strtoull(std::strtok(nullptr, ","), nullptr, 16);
+    u16 length = std::strtoul(std::strtok(nullptr, ","), nullptr, 16);
+
+    LOG_ERROR(Debug, "Breakpoint type {} requested at 0x{:x} len:{}", kind, addr, length);
+
+    // 0 - swbreak, 1 - hwbreak, 2 - write watch, 3 - read watch, 4 - address watch
+    if (maincmd == 'Z' && kind == 0) {
+        thread_state_t* mainthread = this->predator->FindThread(0);
+        if (mainthread == nullptr)
+            return E01;
+
+        BreakpointSetMainThread(mainthread->tid);
+        breakpoint_sw_t* bp = BreakpointAdd_SW(kind, addr, length);
+
+        if (bp == nullptr) {
+            LOG_ERROR(Debug, "Cannot add breakpoint at 0x{:x}", addr);
+            return E01;
+        }
+
+        if (!BreakpointEnable_SW(addr)) {
+            LOG_ERROR(Debug, "Error during adding breakpoint at 0x{:x}", addr);
+            return E01;
+        }
+
+        return OK;
+    }
+
+    if (maincmd == 'z' && kind == 0) {
+        thread_state_t* mainthread = this->predator->FindThread(0);
+        if (mainthread == nullptr)
+            return E01;
+
+        BreakpointSetMainThread(mainthread->tid);
+        breakpoint_sw_t* bp = BreakpointFind_SW(addr);
+        if (bp == nullptr) {
+            LOG_ERROR(Debug, "Requested to remove a breakpoint not set by user?! at 0x{:x}", addr);
+            // not much we can do
+            return OK;
+        }
+
+        if (!BreakpointDisable_SW(addr)) {
+            LOG_ERROR(Debug, "Error during removing breakpoint at 0x{:x}", addr);
+            return E01;
+        }
+
+        return OK;
+    }
+
+    return "";
 }

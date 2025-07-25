@@ -8,12 +8,12 @@
 
 #include "common/types.h"
 #include "gdb_command.h"
+#include "threadinfo.h"
 
 /**
  * Misc functions for GdbStub
  * These aren't in need of attention, so they are moved here
  */
-
 
 enum class ControlCode : char {
     Ack = '+',
@@ -41,5 +41,20 @@ std::string MakeResponse(const std::string msg);
 std::vector<std::string> Split(const std::string& din, char delim);
 // Regular byte swap
 std::string ByteSwap(u64 regval, u8 width = 16);
+std::string byteSwapString(std::string data, u8 width);
+
+std::vector<u8> StringToBytes(std::string in);
+std::string BytesToString(std::vector<u8> in);
+
+/**
+ * ptrace PEEK/POKE address **must** be word-aligned (i.e. every 8 bytes).
+ * Advancing in single bytes is meeeeh, works for reading (just get the left/right-most one,
+ * i forgot already). Writing needs exact placement.
+ * Length in bytes
+ * Not really fast (single byte iterations) but welp, not like we care (yet)
+ */
+
+bool ReadMemory(ThreadID thread, const u64 address, const u64 length, std::vector<u8>& data);
+bool WriteMemory(ThreadID thread, const u64 address, const u64 length, std::vector<u8> data);
 
 #endif // STUBTOOLS_H

@@ -646,18 +646,20 @@ set(DEV_TOOLS src/core/devtools/layer.cpp
               src/core/devtools/widget/shader_list.h
               src/core/devtools/widget/text_editor.cpp
               src/core/devtools/widget/text_editor.h
-              src/gdbstub/gdb_stub.cpp
-              src/gdbstub/gdb_stub.h
-              src/gdbstub/gdb_data.cpp
-              src/gdbstub/gdb_data.h
-              src/gdbstub/gdb_server.h
-              src/gdbstub/gdb_server.cpp
-              
-              src/gdbstub/threadinfo.h
+
+              src/gdbstub/breakpoint.h
+              src/gdbstub/breakpoint.cpp
               src/gdbstub/childtools.h
               src/gdbstub/childtools.cpp
+              src/gdbstub/gdb_data.h
+              src/gdbstub/gdb_data.cpp
+              src/gdbstub/gdb_stub.h
+              src/gdbstub/gdb_stub.cpp
               src/gdbstub/stubtools.h
               src/gdbstub/stubtools.cpp
+
+              src/gdbstub/gdb_server.h
+              src/gdbstub/gdb_server.cpp
               src/gdbstub/ptrace_listener.h
               src/gdbstub/ptrace_listener.cpp
 )

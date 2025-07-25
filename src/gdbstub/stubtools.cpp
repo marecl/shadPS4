@@ -8,9 +8,11 @@
 #include <fmt/xchar.h>
 
 #include "gdb_command.h"
+#include "src/core/address_space.h"
+#include "src/core/memory.h"
 #include "stubtools.h"
-
-static std::string byteSwapString(std::string data, u8 width);
+#include "sys/ptrace.h"
+#include "threadinfo.h"
 
 s8 Preprocess(std::string& data) {
     if (data.empty())
@@ -109,4 +111,72 @@ std::string byteSwapString(std::string data, u8 width) {
         out += data[width - i - 1];
     }
     return out;
+}
+
+std::vector<u8> StringToBytes(std::string in) {
+    std::vector<u8> out{};
+    // we ASSUME received length is even
+    for (u32 idx = 0; idx < in.length(); idx += 2) {
+        u8 _tmp{};
+        sscanf(in.substr(idx, 2).c_str(), "%hhx", &_tmp);
+        out.insert(out.begin(), _tmp);
+    }
+    return out;
+}
+std::string BytesToString(std::vector<u8> in) {
+    std::string out{};
+
+    for (u8 val : in) {
+        out = out + std::format("{:02x}", val);
+    }
+
+    return out;
+}
+
+bool ReadMemory(ThreadID thread, const u64 address, const u64 length, std::vector<u8>& data) {
+    const auto mem = Core::Memory::Instance();
+    if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
+        return false;
+    }
+
+    u64 addr_end = address + length;
+    u8 byte_idx{};
+    u64 addr_aligned{};
+
+    for (u64 curaddr = address; curaddr < addr_end; curaddr++) {
+        addr_aligned = curaddr & (~0x07);
+        byte_idx = curaddr & 0x07;
+
+        u64 d = ptrace(PTRACE_PEEKDATA, thread, addr_aligned, 0);
+        d = (d >> (8 * byte_idx)) & 0xFF; // doesn't need a cast, it stays at u8 range
+        data.insert(data.begin(), d);
+    }
+
+    return true;
+}
+
+bool WriteMemory(ThreadID thread, const u64 address, const u64 length, std::vector<u8> data) {
+    const auto mem = Core::Memory::Instance();
+    if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
+        return false;
+    }
+
+    u64 addr_end = address + length;
+    u8 byte_idx{};
+    u64 addr_aligned{};
+
+    u64 data_idx = 0;
+    for (u64 curaddr = address; curaddr < addr_end; curaddr++) {
+        addr_aligned = curaddr & (~0x07);
+        byte_idx = curaddr & 0x07;
+
+        u64 d = ptrace(PTRACE_PEEKDATA, thread, addr_aligned, 0);
+        // need casting, otherwise they are arbitrarily treated as u32
+        d = d & ~(static_cast<u64>(0xFF) << (8 * byte_idx));
+        d = d | (static_cast<u64>(data[data_idx]) << (8 * byte_idx));
+        ptrace(PTRACE_POKEDATA, thread, addr_aligned, d);
+        ++data_idx;
+    }
+
+    return true;
 }

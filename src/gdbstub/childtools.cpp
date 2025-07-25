@@ -42,7 +42,7 @@ static std::string decerrno(void) {
 // remember to Wait()!!!
 // we assume thread is stopped on a SIGTRAP/SIGSTOP already (new child)
 bool Predator::HijackChild(ThreadID target) {
-    return -1 != ptrace(PTRACE_SEIZE, target, NULL,
+    return -1 != ptrace(PTRACE_SEIZE, target, 0,
                         PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACEFORK |
                             PTRACE_O_TRACEEXEC | PTRACE_O_TRACESYSGOOD);
 }
@@ -73,12 +73,12 @@ bool Predator::ChildThreadContinue(ThreadID target, int signal,
         // Unknown thread, very possible that a child caught SIGSTOP before
         // parent thread could raise an event
         LOG_ERROR(Debug, "[!] Rogue thread {}", target);
-        ptrace(PTRACE_CONT, target, NULL, signal);
+        ptrace(PTRACE_CONT, target, 0, signal);
         return true;
     }
 
     if (!thread->running) {
-        if (ptrace(PTRACE_CONT, target, NULL, signal) == -1) {
+        if (ptrace(PTRACE_CONT, target, 0, signal) == -1) {
             LOG_ERROR(Debug, "[!] Can't continue child {} {}", target, decerrno());
             return false;
         }
@@ -98,7 +98,7 @@ bool Predator::ChildThreadContinueAll(int signal) {
         // LOG_ERROR(Debug, "[+++] Continuing child {}", tid);
 
         if (!state.running) {
-            if (ptrace(PTRACE_CONT, tid, NULL, signal) == -1) {
+            if (ptrace(PTRACE_CONT, tid, 0, signal) == -1) {
                 was_error = true;
                 LOG_ERROR(Debug, "[!] Can't continue child {} {}", tid, decerrno());
             }
@@ -124,7 +124,7 @@ bool Predator::ChildThreadInterrupt(ThreadID target) {
     LOG_INFO(Debug, "Interrupting thread {}", target);
     thread_state_t* thread_info = this->FindThread(target);
     if (thread_info->running) {
-        if (int ret = ptrace(PTRACE_INTERRUPT, target, NULL, 0); ret == -1)
+        if (int ret = ptrace(PTRACE_INTERRUPT, target, 0, 0); ret == -1)
             LOG_ERROR(Debug, "[!] Can't interrupt child {} {}", target, decerrno());
         return false;
     }
@@ -160,7 +160,7 @@ bool Predator::ChildThreadInterruptAll(void) {
     for (auto [tid, info] : this->threads) {
         if (!info.running)
             continue;
-        if (ptrace(PTRACE_INTERRUPT, tid, NULL, 0) == -1) {
+        if (ptrace(PTRACE_INTERRUPT, tid, 0, 0) == -1) {
             LOG_ERROR(Debug, "[!] Can't interrupt child {} {}", tid, decerrno());
             continue;
         }
@@ -170,7 +170,7 @@ bool Predator::ChildThreadInterruptAll(void) {
     thread_event_t evt{};
     bool all_stopped = false;
 
-    LOG_INFO(Debug, "Interrupting all available ({}) thread(s)", target_threads.size());
+    LOG_INFO(Debug, "Interrupting all running threads ({})", target_threads.size());
     while (!target_threads.empty()) {
         if (!listener->Poll(evt))
             continue;
@@ -210,12 +210,10 @@ bool Predator::DumpRegs(ThreadID target) {
         return false;
     }
 
-    if (ptrace(PTRACE_GETREGS, target, nullptr, &this->user_regs) == -1) {
-        LOG_ERROR(Debug, "qweqweqwe");
+    if (ptrace(PTRACE_GETREGS, target, 0, &this->user_regs) == -1) {
         return false;
     }
-    if (ptrace(PTRACE_GETFPREGS, target, nullptr, &this->user_fpregs) == -1) {
-        LOG_ERROR(Debug, "rtyrtyrty");
+    if (ptrace(PTRACE_GETFPREGS, target, 0, &this->user_fpregs) == -1) {
         return false;
     }
 
