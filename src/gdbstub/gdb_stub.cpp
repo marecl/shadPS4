@@ -685,7 +685,7 @@ bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) 
 
     // length = bytes
     u64 addr_end = address + length;
-    u32 byte_idx{};
+    u8 byte_idx{};
     u64 addr_aligned{};
 
     for (u64 curaddr = address; curaddr < addr_end; curaddr++) {
@@ -693,7 +693,7 @@ bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) 
         byte_idx = curaddr & 0x07;
 
         u64 d = ptrace(PTRACE_PEEKDATA, mainthread->tid, addr_aligned, NULL);
-        d = (d >> (8 * byte_idx)) & 0xFF;
+        d = (d >> (8 * byte_idx)) & 0xFF; // doesn't need a cast, it stays at u8 range
         *out = fmt::format("{:02x}", d) + *out;
     }
 
@@ -711,22 +711,18 @@ bool GdbStub::WriteMemory(const u64 address, const u64 length, std::vector<u8> d
 
     // length = bytes
     u64 addr_end = address + length;
-    u64 byte_idx{};
+    u8 byte_idx{};
     u64 addr_aligned{};
-    u64 ff = 0xFF;
 
-    u32 data_idx = 0;
+    u64 data_idx = 0;
     for (u64 curaddr = address; curaddr < addr_end; curaddr++) {
-        u64 pending = data[data_idx];
         addr_aligned = curaddr & (~0x07);
         byte_idx = curaddr & 0x07;
 
-        u64 c = ptrace(PTRACE_PEEKDATA, mainthread->tid, addr_aligned, NULL);
-        u64 d = c & ~(ff << (8 * byte_idx));
-        LOG_ERROR(Debug, "{:x} {:x}", c, d);
-        d = d | (pending << (8 * byte_idx));
-        LOG_ERROR(Debug, "{:x} ({:x} + {:x}) : {:x} -> {:x}", curaddr, addr_aligned, byte_idx, c,
-                  d);
+        u64 d = ptrace(PTRACE_PEEKDATA, mainthread->tid, addr_aligned, NULL);
+        // need casting, otherwise they are arbitrarily treated as u32
+        d = d & ~(static_cast<u64>(0xFF) << (8 * byte_idx));
+        d = d | (static_cast<u64>(data[data_idx]) << (8 * byte_idx));
         ptrace(PTRACE_POKEDATA, mainthread->tid, addr_aligned, d);
         ++data_idx;
     }
