@@ -56,8 +56,8 @@ public:
     /*
      * TODO: this
      */
-    // void loadable_register(u64 base_addr, u64 size, std::string name);
-    // void loadable_unregister();
+    void loadable_register(u64 base_addr, u64 size, std::string name);
+    void loadable_unregister();
 
 private:
     //  main list mutex

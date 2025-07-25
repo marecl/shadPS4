@@ -17,7 +17,6 @@ std::mutex GdbDataImpl::thread_list_mutex;
 std::vector<thread_meta_t> GdbDataImpl::thread_list;
 std::vector<loadable_info_t> GdbDataImpl::loaded_binaries;
 
-
 std::string GdbDataImpl::getThreadName(ThreadID tid) {
     char _rawName[16];
     pthread_getname_np(tid, _rawName, 16);
@@ -29,7 +28,6 @@ void GdbDataImpl::thread_register(ThreadID tid) {
     const u32 tid_encoded = 1 + ((~tid) & 0x7FFFFFFF);
     GdbDataImpl::thread_list.push_back(thread_meta_t(tid, tid_encoded));
     LOG_INFO(Debug, "Thread registered: {} ({:x} -> {:x})", getThreadName(tid), tid, tid_encoded);
-
 }
 
 void GdbDataImpl::thread_unregister(ThreadID tid) {
@@ -137,7 +135,7 @@ void GdbDataImpl::thread_pause_all(ThreadID pause_me_last,
     return;
 }
 
-/*void GdbDataImpl::loadable_register(u64 base_addr, u64 size, std::string name) {
+void GdbDataImpl::loadable_register(u64 base_addr, u64 size, std::string name) {
     loadable_info_t entry(base_addr, size, name);
     loaded_binaries.emplace_back(entry);
     LOG_INFO(Debug, "Loadable registered: {} ({:x} len:{:x})", name, base_addr, size);
@@ -162,4 +160,3 @@ void GdbDataImpl::thread_pause_all(ThreadID pause_me_last,
 void GdbDataImpl::loadable_unregister() {
     LOG_WARNING(Debug, "If you see this we're fucked (this function is never called)");
 }
-*/
