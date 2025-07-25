@@ -118,6 +118,8 @@ bool child_thread_killed(int status);
 int child_thread_kill_reason(int status);
 bool child_thread_evt_clone(int status);
 bool child_thread_evt_exit(int status);
+bool child_thread_evt_fork(int status);
+bool child_thread_evt_execve(int status);
 bool child_thread_sigtrap_is_syscall(int status);
 
 #endif // CHILDTOOLS_H

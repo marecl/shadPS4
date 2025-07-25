@@ -43,7 +43,8 @@ static std::string decerrno(void) {
 // we assume thread is stopped on a SIGTRAP/SIGSTOP already (new child)
 bool Predator::HijackChild(ThreadID target) {
     return -1 != ptrace(PTRACE_SEIZE, target, NULL,
-                        PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESYSGOOD);
+                        PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXIT | PTRACE_O_TRACEFORK |
+                            PTRACE_O_TRACEEXEC | PTRACE_O_TRACESYSGOOD);
 }
 
 void Predator::ThreadRegister(ThreadID target, int signal) {
@@ -310,6 +311,10 @@ bool child_thread_evt_clone(int status) {
 
 bool child_thread_evt_exit(int status) {
     return status >> 8 == (SIGTRAP | (PTRACE_EVENT_EXIT << 8));
+}
+
+bool child_thread_evt_fork(int status) {
+    return status >> 8 == (SIGTRAP | (PTRACE_EVENT_FORK << 8));
 }
 
 bool child_thread_sigtrap_is_syscall(int status) {

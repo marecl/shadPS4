@@ -189,7 +189,7 @@ bool GdbStub::LoopTrace(void) {
             ptrace(PTRACE_GETEVENTMSG, evt.tid, nullptr, &new_tid);
             LOG_INFO(Debug, "[*+] New thread/process: {}", new_tid);
 
-            // Child will sigstop on its own
+            // if ptrace_o_traceclone is used, new thread will raise sigstop on its own
             thread_event_t clone_evt = listener->Wait();
 
             this->predator->ThreadRegister(clone_evt.tid, SIGSTOP);
@@ -206,25 +206,39 @@ bool GdbStub::LoopTrace(void) {
             return 1;
         }
 
+        if (child_thread_evt_fork(evt.status)) {
+            LOG_ERROR(Debug, "child_thread_evt_fork");
+        }
+
+        if (child_thread_evt_execve(evt.status)) {
+            LOG_ERROR(
+                Debug,
+                "child_thread_evt_execve -> may need to re-set the PTRACE_O_TRACEEXEC option");
+        }
+
         if (child_thread_evt_exit(evt.status)) {
             LOG_INFO(Debug, "[*-] Thread {} exits with status {}", evt.tid, evt.status);
 
-            // check if it's main thread and return 0 i think
-            this->predator->ThreadRemove(evt.tid);
-
+            // data is available to read, but there's no guarantee the thread itself is there
             std::string thread_evt_exit_notification =
-                std::format("w{:02x};{:x}", evt.status,
-                            evt.tid); // may need to change status to stop_reason lol
+                std::format("T{:02x}thread:{:x};", evt.status, evt.tid);
             if (!this->SendMessage(thread_evt_exit_notification))
                 this->predator->ChildThreadContinue(evt.tid); // or continue all, idk yet
 
             return 1;
         }
 
-        // no other events, carry on
+        // unhandled event
+        LOG_ERROR(Debug, "stub. unknown and unhandled event");
+        std::string thread_evt_notification =
+            std::format("T{:02x}thread:{:x};", evt.status, evt.tid);
+        if (!this->SendMessage(thread_evt_notification))
+            this->predator->ChildThreadContinue(evt.tid); // or continue all, idk yet
+
         //  predator.ChildThreadContinue(evt.tid);
         return -1; // unknown other event
     }
+
     if (stop_reason == SIGSEGV) {
         siginfo_t info;
 
@@ -237,15 +251,14 @@ bool GdbStub::LoopTrace(void) {
             return 1;
         }
 
+        LOG_ERROR(Debug, "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)", evt.tid,
+                  info.si_code, predator->user_regs.rip, predator->user_regs.rip - 0x7FF000000);
+
         std::string thread_sigsegv_notification =
             std::format("T{:02x}thread:{:x};", stop_reason, evt.tid);
         if (!this->SendMessage(thread_sigsegv_notification)) {
             this->predator->DumpRegs(evt.tid);
-            LOG_ERROR(Debug, "[*] Thread {} got undesired SIGSEGV {:02} at RIP=0x{:X} (:X)",
-                      evt.tid, info.si_code, predator->user_regs.rip,
-                      predator->user_regs.rip - 0x7FF000000);
-
-            this->predator->ChildThreadContinue(evt.tid, SIGSEGV);
+            // this->predator->ChildThreadContinue(evt.tid, SIGSEGV);
         }
     }
 
@@ -367,6 +380,28 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         return PrintRegisters(&this->predator->user_regs, &this->predator->user_fpregs);
     }
 
+    if (maincmd == 'Z') {
+        LOG_ERROR(Debug, "Stub");
+        if (cmd.cmd[1] == '0') {
+            std::vector<std::string> parts = Split(cmd.arg, ',');
+            std::string addr = parts[1];
+            std::string length = parts[2];
+            size_t _addr = std::strtoull(addr.c_str(), nullptr, 16);
+            size_t _length = std::strtoull(addr.c_str(), nullptr, 16);
+
+            LOG_INFO(Debug, "Breakpoint requested at 0x{:x} len:{}", _addr, _length);
+
+            thread_state_t* mainthread = this->predator->FindThread(0);
+
+            static unsigned long orig_instr = ptrace(PTRACE_PEEKDATA, mainthread->tid, _addr, NULL);
+
+            long new_instr = (orig_instr & (~0xFF)) | 0xCC;
+            if (ptrace(PTRACE_POKEDATA, mainthread->tid, _addr, new_instr) == -1) {
+                LOG_ERROR(Debug, "Unable to insert breakpoint");
+            }
+        }
+    }
+
     if (maincmd == 'p') {
         if (this->predator->user_regs_dirty) {
             this->predator->DumpRegs(this->predator->GetTargetRegDump());
@@ -380,6 +415,23 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             return ByteSwap(this->predator->user_regs.fs_base, 16);
         case 0x3B:
             return ByteSwap(this->predator->user_regs.gs_base, 16);
+        case 0x18:
+            return ByteSwap(this->predator->user_fpregs.st_space[0], 20);
+        case 0x19:
+            return ByteSwap(this->predator->user_fpregs.st_space[1], 20);
+        case 0x1A:
+            return ByteSwap(this->predator->user_fpregs.st_space[2], 20);
+        case 0x1B:
+            return ByteSwap(this->predator->user_fpregs.st_space[3], 20);
+        case 0x1C:
+            return ByteSwap(this->predator->user_fpregs.st_space[4], 20);
+        case 0x1D:
+            return ByteSwap(this->predator->user_fpregs.st_space[5], 20);
+        case 0x1E:
+            return ByteSwap(this->predator->user_fpregs.st_space[6], 20);
+        case 0x1F:
+            return ByteSwap(this->predator->user_fpregs.st_space[7], 20);
+            break;
         }
         return "xxxxxxxxxxxxxxxx";
     }
@@ -465,6 +517,8 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
             // vContSupported+ must be sent by gdb, otherwise no debugging
             if (resp.find("swbreak+"))
                 resp += ";swbreak+";
+            if (resp.find("hwbreak+"))
+                resp += ";hwbreak+";
             return resp;
         }
 
@@ -519,6 +573,8 @@ const u16 user_reg_size[X86_64_REG_COUNT] = {8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
 // registers 0-23
 // fs_base - 152
 // gs_base - 153
+// st0  - 24
+//
 const u16 user_reg_offsets[X86_64_REG_COUNT] = {
     offsetof(struct user_regs_struct, rax), offsetof(struct user_regs_struct, rbx),
     offsetof(struct user_regs_struct, rcx), offsetof(struct user_regs_struct, rdx),
@@ -587,9 +643,20 @@ bool GdbStub::ReadMemory(const u64 address, const u64 length, std::string* out) 
     //  if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
     //      return false;
     // }
+    if (address < 0x1000000)
+        return false;
+    if (address > 0x8ffec07dbd60)
+        return false;
+
+    thread_state_t* mainthread = this->predator->FindThread(0);
 
     for (u64 i = 0; i < length; ++i) {
-        *out += fmt::format("{:02x}", *reinterpret_cast<u8*>(address + i));
+        // peekdata and peektext are equivalent
+        u64 d = ptrace(PTRACE_PEEKDATA, mainthread->tid, address + i, NULL);
+        LOG_ERROR(Debug, "{:x} -> {:x}", address, d);
+        for (s8 off = 54; off >= 0; off -= 8) {
+            *out += fmt::format("{:02x}", (d >> off));
+        }
     }
 
     return true;
@@ -640,7 +707,7 @@ void GdbStub::handle_packet_vCont(std::string arg) {
 
         switch (action) {
         default:
-        // check vCont? if implementing these
+            // check vCont? if implementing these
             LOG_ERROR(Debug, "vCont:{} not supported (yet)");
             break;
         case 'C': ///< Supplies its own code
