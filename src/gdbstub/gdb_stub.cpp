@@ -17,6 +17,7 @@
 #include "common/debug.h"
 #include "common/logging/backend.h"
 #include "common/logging/log.h"
+#include "gdb_registers.h"
 #include "gdb_stub.h"
 #include "stubtools.h"
 #include "threadinfo.h"
@@ -358,6 +359,9 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         return TOUCH_GRASS;
     }
 
+    if (maincmd == 'z' || maincmd == 'Z')
+        return handle_packet_z(cmd);
+
     if (maincmd == 'T') {
         u8 cmd_end_idx = cmd.raw.find(static_cast<char>(ControlCode::PacketEnd));
         std::string correct_arg = cmd.raw.substr(2, cmd_end_idx - 2);
@@ -419,39 +423,29 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         return PrintRegisters(&this->predator->user_regs, &this->predator->user_fpregs);
     }
 
-    if (maincmd == 'z' || maincmd == 'Z')
-        return handle_packet_z(cmd);
-
     if (maincmd == 'p') {
         // same as 'g'
-        u16 targetReg = std::stol(cmd.arg, nullptr, 16);
+        u16 target_reg = std::stol(cmd.arg, nullptr, 16);
+        u64 reg_value{};
+        u16 reg_size{};
 
-        switch (targetReg) {
-        default:
-            break;
-        case 0x3A:
-            return ByteSwap(this->predator->user_regs.fs_base, 16);
-        case 0x3B:
-            return ByteSwap(this->predator->user_regs.gs_base, 16);
-        case 0x18:
-            return ByteSwap(this->predator->user_fpregs.st_space[0], 20);
-        case 0x19:
-            return ByteSwap(this->predator->user_fpregs.st_space[1], 20);
-        case 0x1A:
-            return ByteSwap(this->predator->user_fpregs.st_space[2], 20);
-        case 0x1B:
-            return ByteSwap(this->predator->user_fpregs.st_space[3], 20);
-        case 0x1C:
-            return ByteSwap(this->predator->user_fpregs.st_space[4], 20);
-        case 0x1D:
-            return ByteSwap(this->predator->user_fpregs.st_space[5], 20);
-        case 0x1E:
-            return ByteSwap(this->predator->user_fpregs.st_space[6], 20);
-        case 0x1F:
-            return ByteSwap(this->predator->user_fpregs.st_space[7], 20);
-            break;
+        bool reg_correct = RegisterRead(target_reg, &reg_value, &reg_size,
+                                        &this->predator->user_regs, &this->predator->user_fpregs);
+
+        if (!reg_correct) {
+            LOG_ERROR(Debug, "Requested register {} is unavailable", target_reg);
+            std::string _unavailable{};
+            for (u8 idx = 0; idx < reg_size; idx++) {
+                // ghidra stops regdump when 'x'-unavailable register is sent
+                //_unavailable += "xx";
+                _unavailable += "00";
+            }
+
+            return _unavailable;
         }
-        return "xxxxxxxxxxxxxxxx";
+
+        // LOG_ERROR(Debug, "Requested register {} val 0x{:x}", target_reg, reg_value);
+        return ByteSwap(reg_value, reg_size * 2);
     }
 
     if (maincmd == 'H') {
@@ -582,33 +576,6 @@ std::string GdbStub::ThreadList() {
     return buffer;
 }
 
-// we need this to map user_regs_struct to GDB
-// exact order **must** follow GDBs order
-// either in gdb/features/i386/64bit-core OR
-// see what's the order in `info reg` OR
-// `maint print register-groups` with option `set architecture i386:x86-64`
-#define X86_64_REG_COUNT 24
-const u16 user_reg_size[X86_64_REG_COUNT] = {8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
-                                             8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4, 4};
-// registers 0-23
-// fs_base - 152
-// gs_base - 153
-// st0  - 24
-//
-const u16 user_reg_offsets[X86_64_REG_COUNT] = {
-    offsetof(struct user_regs_struct, rax), offsetof(struct user_regs_struct, rbx),
-    offsetof(struct user_regs_struct, rcx), offsetof(struct user_regs_struct, rdx),
-    offsetof(struct user_regs_struct, rsi), offsetof(struct user_regs_struct, rdi),
-    offsetof(struct user_regs_struct, rbp), offsetof(struct user_regs_struct, rsp),
-    offsetof(struct user_regs_struct, r8),  offsetof(struct user_regs_struct, r9),
-    offsetof(struct user_regs_struct, r10), offsetof(struct user_regs_struct, r11),
-    offsetof(struct user_regs_struct, r12), offsetof(struct user_regs_struct, r13),
-    offsetof(struct user_regs_struct, r14), offsetof(struct user_regs_struct, r15),
-    offsetof(struct user_regs_struct, rip), offsetof(struct user_regs_struct, eflags),
-    offsetof(struct user_regs_struct, cs),  offsetof(struct user_regs_struct, ss),
-    offsetof(struct user_regs_struct, ds),  offsetof(struct user_regs_struct, es),
-    offsetof(struct user_regs_struct, fs),  offsetof(struct user_regs_struct, gs)};
-
 std::string GdbStub::PrintRegisters(const struct user_regs_struct* regs,
                                     const struct user_fpregs_struct* fpregs) {
     std::string out{};
@@ -616,7 +583,7 @@ std::string GdbStub::PrintRegisters(const struct user_regs_struct* regs,
     // why map all registers when we have a copy in a known place
     // and thanks to preprocessor we have exact offsets of its members
     const void* base = static_cast<const void*>(regs);
-    for (u8 idx = 0; idx < X86_64_REG_COUNT; idx++) {
+    for (u8 idx = X86_64_REG_BASE; idx < (X86_64_REG_BASE + X86_64_REG_COUNT); idx++) {
         u8 reg_size = user_reg_size[idx]; // bytes
         size_t offset = user_reg_offsets[idx];
         u64 buf = 0;

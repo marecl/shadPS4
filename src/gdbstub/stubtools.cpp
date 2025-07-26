@@ -99,13 +99,14 @@ std::vector<std::string> Split(const std::string& din, char delim) {
 // width in individual digits
 // 64-bits are aligned to 16, 32 to 8 etc.
 std::string ByteSwap(u64 regval, u8 width) {
-    std::string fstr = std::format("{{:0{}x}}", width);
-    std::string regValStr = std::vformat(fstr, std::make_format_args((regval)));
-    return byteSwapString(regValStr, width);
+    std::string regValStr = std::format("{:032x}", regval); // align to 64-bit
+    regValStr = byteSwapString(regValStr);                  // swap
+    return regValStr.substr(0, width);                      // and THEN cut down to length
 }
 
-std::string byteSwapString(std::string data, u8 width) {
-    std::string out = "";
+std::string byteSwapString(std::string data) {
+    u8 width = data.length();
+    std::string out{};
     for (u8 i = 0; i < width; i += 2) {
         out += data[width - i - 2];
         out += data[width - i - 1];
@@ -123,6 +124,7 @@ std::vector<u8> StringToBytes(std::string in) {
     }
     return out;
 }
+
 std::string BytesToString(std::vector<u8> in) {
     std::string out{};
 
