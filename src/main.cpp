@@ -31,7 +31,7 @@ int main(int argc, char* argv[]) {
     ThreadID child_pid = fork();
 
     if (child_pid == 0) {
-        prctl(PR_SET_PDEATHSIG, SIGTERM);
+        prctl(PR_SET_PDEATHSIG, SIGINT);
         raise(SIGSTOP);
 #endif
         auto ret = MainReal(argc, argv);
@@ -112,7 +112,7 @@ int main(int argc, char* argv[]) {
             stub.LoopTrace();
         }
 
-        kill(child_pid, SIGTERM);
+        kill(child_pid, SIGINT);
         stub.End(0);
         stub_server.Stop();
 

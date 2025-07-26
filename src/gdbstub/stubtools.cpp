@@ -98,7 +98,7 @@ std::vector<std::string> Split(const std::string& din, char delim) {
 
 // width in individual digits
 // 64-bits are aligned to 16, 32 to 8 etc.
-std::string ByteSwap(u64 regval, u8 width) {
+std::string ByteSwap(u64 regval, u16 width) {
     std::string regValStr = std::format("{:032x}", regval); // align to 64-bit
     regValStr = byteSwapString(regValStr);                  // swap
     return regValStr.substr(0, width);                      // and THEN cut down to length
@@ -137,9 +137,9 @@ std::string BytesToString(std::vector<u8> in) {
 
 bool ReadMemory(ThreadID thread, const u64 address, const u64 length, std::vector<u8>& data) {
     const auto mem = Core::Memory::Instance();
-    if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
-        return false;
-    }
+    // if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
+    //     return false;
+    // }
 
     u64 addr_end = address + length;
     u8 byte_idx{};
@@ -150,6 +150,8 @@ bool ReadMemory(ThreadID thread, const u64 address, const u64 length, std::vecto
         byte_idx = curaddr & 0x07;
 
         u64 d = ptrace(PTRACE_PEEKDATA, thread, addr_aligned, 0);
+        if (errno !=0)
+            return false;
         d = (d >> (8 * byte_idx)) & 0xFF; // doesn't need a cast, it stays at u8 range
         data.insert(data.begin(), d);
     }
@@ -159,7 +161,9 @@ bool ReadMemory(ThreadID thread, const u64 address, const u64 length, std::vecto
 
 bool WriteMemory(ThreadID thread, const u64 address, const u64 length, std::vector<u8> data) {
     const auto mem = Core::Memory::Instance();
-    if (!mem->IsValidAddress(reinterpret_cast<void*>(address))) {
+
+    bool valid_address_emulator = mem->IsValidAddress(reinterpret_cast<void*>(address));
+    if (!valid_address_emulator) {
         return false;
     }
 

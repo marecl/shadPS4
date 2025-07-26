@@ -40,7 +40,7 @@ std::string MakeResponse(const std::string msg);
 // Split string into smaller strings
 std::vector<std::string> Split(const std::string& din, char delim);
 // Regular byte swap
-std::string ByteSwap(u64 regval, u8 width );
+std::string ByteSwap(u64 regval, u16 width );
 std::string byteSwapString(std::string data);
 
 std::vector<u8> StringToBytes(std::string in);

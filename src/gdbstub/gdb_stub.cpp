@@ -333,6 +333,15 @@ s8 GdbStub::HandleContinuous(GdbCommand cmd) {
     return 0;
 }
 
+// sometimes parser may interpret letters in arguments
+// as parts of the command. i'm lazy and i don't want to
+// deal with edge cases, so every command needs to fix itself
+void fix(GdbCommand& cmd, u8 argstart) {
+    std::string combo = cmd.cmd + cmd.arg;
+    cmd.cmd = combo.substr(0, argstart);
+    cmd.arg = combo.substr(argstart);
+}
+
 std::string GdbStub::HandlePacket(GdbCommand cmd) {
     char maincmd = cmd.cmd[0];
 
@@ -363,12 +372,9 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
         return handle_packet_z(cmd);
 
     if (maincmd == 'T') {
-        u8 cmd_end_idx = cmd.raw.find(static_cast<char>(ControlCode::PacketEnd));
-        std::string correct_arg = cmd.raw.substr(2, cmd_end_idx - 2);
-        std::cout << cmd.raw << correct_arg << std::endl;
-        std::cout.flush();
+        fix(cmd, 1);
 
-        ThreadID ttid = std::stoul(correct_arg, nullptr, 16);
+        ThreadID ttid = std::stoul(cmd.arg, nullptr, 16);
         if (thread_state_t* thread = this->predator->FindThread(ttid); thread != nullptr) {
             return OK;
         }
@@ -393,8 +399,9 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'm') {
+        fix(cmd, 1);
         u8 sepidx = cmd.arg.find(',');
-        u64 addr = std::stoull(cmd.arg.substr(0, sepidx), nullptr, 16);
+        u64 addr = std::stoull(cmd.raw.substr(2, sepidx), nullptr, 16);
         u64 len = std::stoull(cmd.arg.substr(sepidx + 1), nullptr, 16);
         LOG_INFO(Debug, "GDB m packet read from address 0x{:x} length {}", addr, len);
         std::vector<u8> mem{};
@@ -405,6 +412,7 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'M') {
+        fix(cmd, 1);
         u8 comma_idx = cmd.arg.find(',');
         u64 addr = std::stoull(cmd.arg.substr(0, comma_idx), nullptr, 16);
         u64 len = std::stoull(cmd.arg.substr(comma_idx + 1), nullptr, 16);
@@ -449,10 +457,10 @@ std::string GdbStub::HandlePacket(GdbCommand cmd) {
     }
 
     if (maincmd == 'H') {
-        u8 cmd_end_idx = cmd.raw.find(static_cast<char>(ControlCode::PacketEnd));
-        std::string correct_arg = cmd.raw.substr(3, cmd_end_idx - 3);
+        // assumed 2 characters at all times
+        fix(cmd, 2);
 
-        ThreadID ttid = std::stoul(correct_arg, nullptr, 16);
+        ThreadID ttid = std::stoul(cmd.arg, nullptr, 16);
         ThreadID* threadActionTarget = nullptr;
 
         char subcmd = cmd.cmd[1];
@@ -579,20 +587,18 @@ std::string GdbStub::ThreadList() {
 std::string GdbStub::PrintRegisters(const struct user_regs_struct* regs,
                                     const struct user_fpregs_struct* fpregs) {
     std::string out{};
+    u64 reg_val{};
+    u16 reg_size{};
 
-    // why map all registers when we have a copy in a known place
-    // and thanks to preprocessor we have exact offsets of its members
     const void* base = static_cast<const void*>(regs);
     for (u8 idx = X86_64_REG_BASE; idx < (X86_64_REG_BASE + X86_64_REG_COUNT); idx++) {
-        u8 reg_size = user_reg_size[idx]; // bytes
-        size_t offset = user_reg_offsets[idx];
-        u64 buf = 0;
-        memcpy(&buf, static_cast<const u8*>(base) + offset, reg_size);
-        out = out + ByteSwap(buf, reg_size * 2);
+        RegisterRead(idx, &reg_val, &reg_size, regs, fpregs);
+        // this register section is *assumed* to be correct at all times
+        out = out + ByteSwap(reg_val, reg_size * 2);
     }
 
     // Uncomment for some insider knowledge
-    /*
+
     LOG_INFO(Debug, "RAX\t{:016x}", regs->rax);
     LOG_INFO(Debug, "RBX\t{:016x}", regs->rbx);
     LOG_INFO(Debug, "RCX\t{:016x}", regs->rcx);
@@ -619,7 +625,6 @@ std::string GdbStub::PrintRegisters(const struct user_regs_struct* regs,
     LOG_INFO(Debug, "FSBASE\t{:016x}", regs->fs_base);
     LOG_INFO(Debug, "GS\t{:08x}", regs->gs);
     LOG_INFO(Debug, "GSBASE\t{:016x}", regs->gs_base);
-    */
 
     return out;
 }

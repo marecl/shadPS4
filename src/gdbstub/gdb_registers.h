@@ -101,8 +101,8 @@ const u16 user_reg_2_offsets[X86_64_REG_COUNT] = {offsetof(struct user_regs_stru
                                                   offsetof(struct user_regs_struct, gs_base),
                                                   offsetof(struct user_regs_struct, orig_rax)};
 
-bool RegisterRead(u16 target_reg, u64* value, u16* size, struct user_regs_struct* user_regs,
-                  struct user_fpregs_struct* user_fpregs) {
+bool RegisterRead(u16 target_reg, u64* value, u16* size, const struct user_regs_struct* user_regs,
+                  const struct user_fpregs_struct* user_fpregs) {
 
     if (target_reg > X84_64_REG_TOTAL) {
         *value = 0;
@@ -111,20 +111,20 @@ bool RegisterRead(u16 target_reg, u64* value, u16* size, struct user_regs_struct
     }
 
     u16 target_reg_size = user_reg_size[target_reg];
-    void* base{};
+    const void* base{};
     u16 idx{};
     u16 offset{};
 
     *size = target_reg_size;
 
     if (target_reg >= X86_64_REG_BASE && target_reg < (X86_64_REG_BASE + X86_64_REG_COUNT)) {
-        base = static_cast<void*>(user_regs);
+        base = static_cast<const void*>(user_regs);
         idx = target_reg - X86_64_REG_BASE;
         offset = user_reg_offsets[idx];
     }
 
     if (target_reg >= X86_64_REG_2_BASE && target_reg < (X86_64_REG_2_BASE + X86_64_REG_2_COUNT)) {
-        base = static_cast<void*>(user_regs);
+        base = static_cast<const void*>(user_regs);
         idx = target_reg - X86_64_REG_2_BASE;
         offset = user_reg_2_offsets[idx];
     }
@@ -134,7 +134,7 @@ bool RegisterRead(u16 target_reg, u64* value, u16* size, struct user_regs_struct
             // these are unavailable until I can find them in memory
             return false;
         }
-        base = static_cast<void*>(user_fpregs);
+        base = static_cast<const void*>(user_fpregs);
         idx = target_reg - X86_64_FPREG_BASE;
         offset = user_fpreg_offsets[idx];
     }
