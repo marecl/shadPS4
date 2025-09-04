@@ -9,13 +9,24 @@
 #include "common/types.h"
 #include "core/file_sys/directories/base_directory.h"
 #include "core/libraries/kernel/orbis_error.h"
+#include "tracker.h"
 
 namespace Core::Directories {
 
+static constexpr s32 DIRECTORY_PFS_ALIGNMENT = 0x10000;
+
+struct PfsDirectoryDirent {
+    u32 d_fileno{0};
+    u32 d_type{0};
+    u32 d_namlen{0};
+    u32 d_reclen{0};
+    char d_name[MAX_LENGTH + 1]{0};
+};
+
 class PfsDirectory final : public BaseDirectory {
 public:
-    static std::shared_ptr<BaseDirectory> Create(std::string_view guest_path);
-    explicit PfsDirectory(std::string_view guest_path);
+    static std::shared_ptr<BaseDirectory> Create(std::string_view guest_directory);
+    explicit PfsDirectory(std::string_view guest_directory);
     ~PfsDirectory() override = default;
 
     virtual s64 read(void* buf, u64 nbytes) override;
@@ -27,24 +38,6 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
-    static constexpr s32 MAX_LENGTH = 255;
-    static constexpr s32 DIRECTORY_ALIGNMENT = 0x10000;
-    struct PfsDirectoryDirent {
-        u32 d_fileno;
-        u32 d_type;
-        u32 d_namlen;
-        u32 d_reclen;
-        char d_name[MAX_LENGTH + 1];
-    };
-
-    struct NormalDirectoryDirent {
-        u32 d_fileno;
-        u16 d_reclen;
-        u8 d_type;
-        u8 d_namlen;
-        char d_name[MAX_LENGTH + 1];
-    };
-
     u64 directory_size = 0;
     u64 directory_content_size = 0;
     s64 dirents_index = 0;

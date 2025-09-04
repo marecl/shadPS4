@@ -18,9 +18,13 @@ struct OrbisKernelDirent;
 
 namespace Core::Directories {
 
+static constexpr s32 MAX_LENGTH = 255;
+static constexpr u8 DIRENT_TYPE_DIR = 4;
+static constexpr u8 DIRENT_TYPE_FILE = 8;
+
 class BaseDirectory {
 public:
-    explicit BaseDirectory();
+    explicit BaseDirectory(std::string_view guest_directory);
 
     virtual ~BaseDirectory() = 0;
 
@@ -47,6 +51,9 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
+
+protected:
+    const std::string_view guest_directory;
 };
 
 } // namespace Core::Directories

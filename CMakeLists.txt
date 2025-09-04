@@ -773,6 +773,8 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/file_sys/directories/normal_directory.h
          src/core/file_sys/directories/pfs_directory.cpp
          src/core/file_sys/directories/pfs_directory.h
+         src/core/file_sys/directories/tracker.cpp
+         src/core/file_sys/directories/tracker.h
          src/core/file_format/pfs.h
          src/core/file_format/psf.cpp
          src/core/file_format/psf.h

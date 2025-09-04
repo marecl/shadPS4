@@ -6,6 +6,7 @@
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/file_sys/directories/pfs_directory.h"
+#include "core/file_sys/directories/normal_directory.h"
 #include "core/file_sys/fs.h"
 
 namespace Core::Directories {
@@ -14,7 +15,7 @@ std::shared_ptr<BaseDirectory> PfsDirectory::Create(std::string_view guest_direc
     return std::static_pointer_cast<BaseDirectory>(std::make_shared<PfsDirectory>(guest_directory));
 }
 
-PfsDirectory::PfsDirectory(std::string_view guest_directory) {
+PfsDirectory::PfsDirectory(std::string_view guest_directory) : BaseDirectory(guest_directory) {
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
     static s32 fileno = 0;
@@ -37,7 +38,7 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
         directory_content_size += dirent.d_reclen;
     });
 
-    directory_size = Common::AlignUp(directory_content_size, DIRECTORY_ALIGNMENT);
+    directory_size = Common::AlignUp(directory_content_size, DIRECTORY_NORMAL_ALIGNMENT);
 }
 
 s64 PfsDirectory::read(void* buf, u64 nbytes) {

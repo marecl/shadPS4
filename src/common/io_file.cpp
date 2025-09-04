@@ -9,6 +9,9 @@
 #include "common/io_file.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "common/singleton.h"
+
+#include "src/core/file_sys/directories/tracker.h"
 
 #ifdef _WIN32
 #include "common/ntapi.h"
@@ -197,6 +200,8 @@ int IOFile::Open(const fs::path& path, FileAccessMode mode, FileType type, FileS
         LOG_ERROR(Common_Filesystem, "Failed to open the file at path={}, error_message={}",
                   PathToUTF8String(file_path), ec.message());
     }
+
+    auto* tracker = Common::Singleton<Core::FileSys::FileTracker>::Instance();
 
     return result;
 }

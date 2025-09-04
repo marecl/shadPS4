@@ -7,6 +7,7 @@
 #include "common/singleton.h"
 #include "core/file_sys/directories/normal_directory.h"
 #include "core/file_sys/fs.h"
+#include "tracker.h"
 
 namespace Core::Directories {
 
@@ -15,8 +16,11 @@ std::shared_ptr<BaseDirectory> NormalDirectory::Create(std::string_view guest_di
         std::make_shared<NormalDirectory>(guest_directory));
 }
 
-NormalDirectory::NormalDirectory(std::string_view guest_directory) {
-    auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+NormalDirectory::NormalDirectory(std::string_view guest_directory)
+    : BaseDirectory(guest_directory) {
+
+    auto* mnt = Common::Singleton<FileSys::MntPoints>::Instance();
+    auto tracker = Common::Singleton<FileSys::FileTracker>::Instance();
 
     static s32 fileno = 0;
     mnt->IterateDirectory(guest_directory, [this](const auto& ent_path, const auto ent_is_file) {
@@ -39,13 +43,14 @@ NormalDirectory::NormalDirectory(std::string_view guest_directory) {
     // The last entry of a normal directory should have d_reclen covering the remaining data.
     // Since the dirents of a folder are constant by this point, we can modify the last dirent
     // before creating the emulated file buffer.
-    const u64 filler_count = Common::AlignUp(directory_size, DIRECTORY_ALIGNMENT) - directory_size;
+    const u64 filler_count =
+        Common::AlignUp(directory_size, DIRECTORY_NORMAL_ALIGNMENT) - directory_size;
     dirents[dirents.size() - 1].d_reclen += filler_count;
 
     // Reading from standard directories seems to be based around file pointer logic.
     // Keep an internal buffer representing the raw contents of this file descriptor,
     // then emulate the various read functions with that.
-    directory_size = Common::AlignUp(directory_size, DIRECTORY_ALIGNMENT);
+    directory_size = Common::AlignUp(directory_size, DIRECTORY_NORMAL_ALIGNMENT);
     data_buffer.reserve(directory_size);
     memset(data_buffer.data(), 0, directory_size);
 
@@ -64,6 +69,8 @@ NormalDirectory::NormalDirectory(std::string_view guest_directory) {
         current_dirent += dirent.d_reclen;
     }
 }
+
+void NormalDirectory::update(void) {}
 
 s64 NormalDirectory::read(void* buf, u64 nbytes) {
     // Nothing left to read.

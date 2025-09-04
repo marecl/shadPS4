@@ -9,15 +9,26 @@
 #include "common/types.h"
 #include "core/file_sys/directories/base_directory.h"
 #include "core/libraries/kernel/orbis_error.h"
+#include "tracker.h"
 
 namespace Core::Directories {
 
+static constexpr s64 DIRECTORY_NORMAL_ALIGNMENT = 0x200;
+
+struct NormalDirectoryDirent {
+    u32 d_fileno{0};
+    u16 d_reclen{0};
+    u8 d_type{0};
+    u8 d_namlen{0};
+    char d_name[MAX_LENGTH + 1]{0};
+};
+
 class NormalDirectory final : public BaseDirectory {
 public:
-    static std::shared_ptr<BaseDirectory> Create(std::string_view guest_path);
-    explicit NormalDirectory(std::string_view guest_path);
+    static std::shared_ptr<BaseDirectory> Create(std::string_view guest_directory);
+    explicit NormalDirectory(std::string_view guest_directory);
     ~NormalDirectory() override = default;
-
+    void update(void);
     virtual s64 read(void* buf, u64 nbytes) override;
     virtual s64 readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) override;
     virtual s64 preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt,
@@ -27,16 +38,6 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
-    static constexpr s32 MAX_LENGTH = 255;
-    static constexpr s64 DIRECTORY_ALIGNMENT = 0x200;
-    struct NormalDirectoryDirent {
-        u32 d_fileno;
-        u16 d_reclen;
-        u8 d_type;
-        u8 d_namlen;
-        char d_name[MAX_LENGTH + 1];
-    };
-
     u64 directory_size = 0;
     s64 file_offset = 0;
     std::vector<u8> data_buffer;

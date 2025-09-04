@@ -8,7 +8,8 @@
 
 namespace Core::Directories {
 
-BaseDirectory::BaseDirectory() = default;
+BaseDirectory::BaseDirectory(std::string_view guest_directory)
+    : guest_directory(guest_directory) {};
 
 BaseDirectory::~BaseDirectory() = default;
 

@@ -73,6 +73,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
     LOG_INFO(Kernel_Fs, "path = {} flags = {:#x} mode = {}", raw_path, flags, mode);
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    auto* tracker = Common::Singleton<Core::FileSys::FileTracker>::Instance();
 
     bool read = (flags & 0x3) == ORBIS_KERNEL_O_RDONLY;
     bool write = (flags & 0x3) == ORBIS_KERNEL_O_WRONLY;
@@ -229,6 +230,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
     }
 
     file->is_opened = true;
+    tracker->NodeAdd(file->m_guest_name);
     return handle;
 }
 
