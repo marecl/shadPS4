@@ -28,6 +28,10 @@ public:
 
     virtual ~BaseDirectory() = 0;
 
+    virtual bool update(void) {
+        return false;
+    }
+
     virtual s64 read(void* buf, u64 nbytes) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
@@ -53,6 +57,8 @@ public:
     }
 
 protected:
+    // tracking validity of cached data
+    u64 nonce{0};
     const std::string_view guest_directory;
 };
 

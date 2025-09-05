@@ -29,6 +29,7 @@ public:
     explicit PfsDirectory(std::string_view guest_directory);
     ~PfsDirectory() override = default;
 
+    virtual bool update(void) override;
     virtual s64 read(void* buf, u64 nbytes) override;
     virtual s64 readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) override;
     virtual s64 preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt,
@@ -38,9 +39,9 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
-    u64 directory_size = 0;
-    u64 directory_content_size = 0;
-    s64 dirents_index = 0;
-    std::vector<PfsDirectoryDirent> dirents;
+    u64 directory_size{0};
+    u64 directory_content_size{0};
+    s64 dirents_index{0};
+    std::vector<PfsDirectoryDirent> dirents{};
 };
 } // namespace Core::Directories

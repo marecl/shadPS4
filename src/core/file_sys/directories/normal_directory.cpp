@@ -20,9 +20,9 @@ NormalDirectory::NormalDirectory(std::string_view guest_directory)
     : BaseDirectory(guest_directory) {
 
     auto* mnt = Common::Singleton<FileSys::MntPoints>::Instance();
-    auto tracker = Common::Singleton<FileSys::FileTracker>::Instance();
 
     static s32 fileno = 0;
+
     mnt->IterateDirectory(guest_directory, [this](const auto& ent_path, const auto ent_is_file) {
         auto& dirent = dirents.emplace_back();
         dirent.d_fileno = ++fileno;
@@ -70,7 +70,9 @@ NormalDirectory::NormalDirectory(std::string_view guest_directory)
     }
 }
 
-void NormalDirectory::update(void) {}
+bool NormalDirectory::update(void) {
+    return false;
+}
 
 s64 NormalDirectory::read(void* buf, u64 nbytes) {
     // Nothing left to read.

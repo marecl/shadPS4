@@ -230,7 +230,7 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
     }
 
     file->is_opened = true;
-    tracker->NodeAdd(file->m_guest_name);
+    tracker->Add(file->m_guest_name, !directory);
     return handle;
 }
 

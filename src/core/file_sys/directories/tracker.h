@@ -17,12 +17,12 @@ namespace fs = std::filesystem;
 
 typedef struct Node {
     Node* parent{};
-    u64 fileno{0};
-    bool modified{false};
+    u32 fileno{0};
+    u64 nonce{1};
     // dir name, next node
     std::unordered_map<std::string, Node> dirs{};
     // file name, fileno
-    std::unordered_map<std::string, u64> files{};
+    std::unordered_map<std::string, u32> files{};
 } Node;
 
 class FileTracker {
@@ -30,17 +30,18 @@ public:
     FileTracker(void);
     ~FileTracker(void) = default;
 
-    void NodeAdd(const fs::path& path);
-    bool NodeRemove(const fs::path& path);
-    Node* NodeGet(const fs::path& prefix);
-    std::pair<u64, Node*> NodeGetDirectory(const fs::path& prefix);
+    // returns last node. if `location` is provided, creates nodes there
+    // may throw FS around, so use this to create relative paths/files
+    Node* Add(const fs::path& path, bool is_file, Node* location = nullptr);
+    bool Remove(const fs::path& path);
+    Node* GetDirectory(const fs::path& prefix);
     void NodeCollect(Node* node, const fs::path& base, std::vector<fs::path>& out);
 
 private:
     bool _NodeRemoveImpl(const fs::path& full, fs::path::const_iterator it);
 
     Node root;
-    u64 fileno_top = 0;
+    u32 fileno_top = 0;
 };
 
 }; // namespace Core::FileSys

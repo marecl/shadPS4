@@ -28,7 +28,7 @@ public:
     static std::shared_ptr<BaseDirectory> Create(std::string_view guest_directory);
     explicit NormalDirectory(std::string_view guest_directory);
     ~NormalDirectory() override = default;
-    void update(void);
+    virtual bool update(void) override;
     virtual s64 read(void* buf, u64 nbytes) override;
     virtual s64 readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) override;
     virtual s64 preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt,

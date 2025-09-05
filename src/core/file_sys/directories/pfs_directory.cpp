@@ -5,9 +5,10 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
-#include "core/file_sys/directories/pfs_directory.h"
 #include "core/file_sys/directories/normal_directory.h"
+#include "core/file_sys/directories/pfs_directory.h"
 #include "core/file_sys/fs.h"
+#include "tracker.h"
 
 namespace Core::Directories {
 
@@ -16,32 +17,82 @@ std::shared_ptr<BaseDirectory> PfsDirectory::Create(std::string_view guest_direc
 }
 
 PfsDirectory::PfsDirectory(std::string_view guest_directory) : BaseDirectory(guest_directory) {
+    auto tracker = Common::Singleton<FileSys::FileTracker>::Instance();
+    tracker->Add(guest_directory, false);
+    update();
+}
+
+u32 calcreclen(PfsDirectoryDirent* dirent) {
+    return Common::AlignUp(sizeof(dirent->d_fileno) + sizeof(dirent->d_type) +
+                               sizeof(dirent->d_namlen) + sizeof(dirent->d_reclen) +
+                               (dirent->d_namlen + 1),
+                           8);
+}
+
+PfsDirectoryDirent makedirent_dir(std::string name, FileSys::Node* node) {
+    PfsDirectoryDirent out{};
+    out.d_fileno = node->fileno;
+    out.d_type = DIRENT_TYPE_DIR;
+    out.d_namlen = name.size() + 1;
+    strncpy(out.d_name, name.data(), out.d_namlen);
+    out.d_reclen = calcreclen(&out);
+    return out;
+}
+PfsDirectoryDirent makedirent_file(std::string name, u32 fileno) {
+    PfsDirectoryDirent out{};
+    out.d_fileno = fileno;
+    out.d_type = DIRENT_TYPE_FILE;
+    out.d_namlen = name.size() + 1;
+    strncpy(out.d_name, name.data(), out.d_namlen);
+    out.d_reclen = calcreclen(&out);
+    return out;
+}
+
+bool PfsDirectory::update(void) {
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
+    auto tracker = Common::Singleton<FileSys::FileTracker>::Instance();
 
-    static s32 fileno = 0;
-    mnt->IterateDirectory(guest_directory, [this](const auto& ent_path, const auto ent_is_file) {
-        auto& dirent = dirents.emplace_back();
-        dirent.d_fileno = ++fileno;
-        dirent.d_type = (ent_is_file ? 8 : 4);
-        strncpy(dirent.d_name, ent_path.filename().string().data(), MAX_LENGTH + 1);
-        dirent.d_namlen = ent_path.filename().string().size();
+    // we don't save our node, target directory may get deleted without our knowledge
+    FileSys::Node* target = tracker->GetDirectory(this->guest_directory);
+    if (target == nullptr) {
+        // Error: target doesn't exist!
+        return false;
+    }
 
-        // Calculate the appropriate length for this dirent.
-        // Account for the null terminator in d_name too.
-        dirent.d_reclen = Common::AlignUp(sizeof(dirent.d_fileno) + sizeof(dirent.d_type) +
-                                              sizeof(dirent.d_namlen) + sizeof(dirent.d_reclen) +
-                                              (dirent.d_namlen + 1),
-                                          8);
+    if (mnt->ReadDirectory(guest_directory) == nonce)
+        return true;
 
-        // To handle some obscure dirents_index behavior,
-        // keep track of the "actual" length of this directory.
+    dirents.clear();
+    directory_content_size = 0;
+    directory_size = 0;
+
+    auto& dirent_curdir = dirents.emplace_back(makedirent_dir(".", target));
+    auto& dirent_parent_dir = dirents.emplace_back(makedirent_dir("..", target));
+    dirent_parent_dir.d_fileno = target->parent->fileno;
+
+    for (auto dir : target->dirs) {
+        std::string subdir_name = dir.first;
+        auto& dirent = dirents.emplace_back(makedirent_dir(dir.first, &dir.second));
         directory_content_size += dirent.d_reclen;
-    });
+    }
 
-    directory_size = Common::AlignUp(directory_content_size, DIRECTORY_NORMAL_ALIGNMENT);
+    for (auto file : target->files) {
+        std::string file_name = file.first;
+        auto file_fileno = file.second;
+        auto& dirent = dirents.emplace_back(makedirent_file(file.first, file.second));
+        directory_content_size += dirent.d_reclen;
+    }
+
+    nonce = target->nonce;
+    directory_size = Common::AlignUp(directory_content_size, DIRECTORY_PFS_ALIGNMENT);
+
+    return true;
 }
 
 s64 PfsDirectory::read(void* buf, u64 nbytes) {
+    if (!update())
+        return -1;
+
     if (dirents_index >= dirents.size()) {
         if (dirents_index < directory_content_size) {
             // We need to find the appropriate dirents_index to start from.
@@ -168,6 +219,10 @@ s32 PfsDirectory::fstat(Libraries::Kernel::OrbisKernelStat* stat) {
 
 s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     // basep is set at the start of the function.
+
+    if (!update())
+        return -1;
+
     if (basep != nullptr) {
         *basep = dirents_index;
     }

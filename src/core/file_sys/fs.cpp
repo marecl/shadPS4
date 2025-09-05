@@ -3,9 +3,11 @@
 
 #include <algorithm>
 #include "common/config.h"
+#include "common/singleton.h"
 #include "common/string_util.h"
 #include "core/file_sys/devices/logger.h"
 #include "core/file_sys/devices/nop_device.h"
+#include "core/file_sys/directories/tracker.h"
 #include "core/file_sys/fs.h"
 
 namespace Core::FileSys {
@@ -188,6 +190,83 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
             }
         }
     }
+}
+
+// TODO: Does not handle mount points inside mount points.
+void MntPoints::IterateDirectory2(std::string_view guest_directory,
+                                  const IterateDirectoryCallback& callback) {
+    const auto base_path = GetHostPath(guest_directory, nullptr, true);
+    const auto patch_path = GetHostPath(guest_directory, nullptr, false);
+    // Only need to consider patch path if it exists and does not resolve to the same as base.
+    const auto apply_patch = base_path != patch_path && std::filesystem::exists(patch_path);
+
+    // Prepend entries for . and .., as both are treated as files on PS4.
+    callback(base_path / ".", false);
+    callback(base_path / "..", false);
+
+    // Pass 1: Any files that existed in the base directory, using patch directory if needed.
+    if (std::filesystem::exists(base_path)) {
+        for (const auto& entry : std::filesystem::directory_iterator(base_path)) {
+            if (apply_patch) {
+                const auto patch_entry_path = patch_path / entry.path().filename();
+                if (std::filesystem::exists(patch_entry_path)) {
+                    callback(patch_entry_path, !std::filesystem::is_directory(patch_entry_path));
+                    continue;
+                }
+            }
+            callback(entry.path(), !entry.is_directory());
+        }
+    }
+
+    // Pass 2: Any files that exist only in the patch directory.
+    if (apply_patch) {
+        for (const auto& entry : std::filesystem::directory_iterator(patch_path)) {
+            const auto base_entry_path = base_path / entry.path().filename();
+            if (!std::filesystem::exists(base_entry_path)) {
+                callback(entry.path(), !entry.is_directory());
+            }
+        }
+    }
+}
+
+// TODO: Does not handle mount points inside mount points.
+u64 MntPoints::ReadDirectory(std::string_view guest_directory) {
+    auto tracker = Common::Singleton<FileSys::FileTracker>::Instance();
+    auto dir_node = tracker->Add(guest_directory, false);
+
+    const auto base_path = GetHostPath(guest_directory, nullptr, true);
+    const auto patch_path = GetHostPath(guest_directory, nullptr, false);
+    // Only need to consider patch path if it exists and does not resolve to the same as base.
+    const auto apply_patch = base_path != patch_path && std::filesystem::exists(patch_path);
+
+    // Pass 1: Any files that existed in the base directory, using patch directory if needed.
+    if (std::filesystem::exists(base_path)) {
+        for (const auto& entry : std::filesystem::directory_iterator(base_path)) {
+            const auto entry_file_name = entry.path().filename();
+            if (apply_patch) {
+                const auto patch_entry_path = patch_path / entry_file_name;
+                if (std::filesystem::exists(patch_entry_path)) {
+                    tracker->Add(entry_file_name,
+                                     !std::filesystem::is_directory(patch_entry_path), dir_node);
+                    continue;
+                }
+            }
+            tracker->Add(entry_file_name, !entry.is_directory(), dir_node);
+        }
+    }
+
+    // Pass 2: Any files that exist only in the patch directory.
+    if (apply_patch) {
+        for (const auto& entry : std::filesystem::directory_iterator(patch_path)) {
+            const auto entry_file_name = entry.path().filename();
+            const auto base_entry_path = base_path / entry.path().filename();
+            if (!std::filesystem::exists(base_entry_path)) {
+                tracker->Add(entry_file_name, !entry.is_directory(), dir_node);
+            }
+        }
+    }
+    
+    return dir_node->nonce;
 }
 
 int HandleTable::CreateHandle() {
