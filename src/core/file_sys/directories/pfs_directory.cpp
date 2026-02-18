@@ -50,8 +50,7 @@ s64 PfsDirectory::read(void* buf, u64 nbytes) {
     memcpy(buf, this->dirent_cache_bin.data() + file_offset, bytes_available);
 
     // TODO: this may throw stuff up on small reads
-    s64 to_fill =
-        (std::min<s64>(directory_size, static_cast<s64>(nbytes))) - bytes_available - file_offset;
+    s64 to_fill = nbytes - bytes_available - file_offset;
     if (to_fill < 0) {
         LOG_ERROR(Kernel_Fs, "Dirent may have leaked {} bytes", -to_fill);
         return bytes_available;
