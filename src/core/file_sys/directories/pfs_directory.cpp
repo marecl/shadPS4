@@ -46,18 +46,18 @@ s64 PfsDirectory::read(void* buf, u64 nbytes) {
     if (bytes_available <= 0)
         return 0;
 
-    bytes_available = std::min<s64>(bytes_available, static_cast<s64>(nbytes));
-    memcpy(buf, this->dirent_cache_bin.data() + file_offset, bytes_available);
+    s64 bytes_to_read = std::min<s64>(bytes_available, static_cast<s64>(nbytes));
+    memcpy(buf, this->dirent_cache_bin.data() + file_offset, bytes_to_read);
 
     // TODO: this may throw stuff up on small reads
-    s64 to_fill = nbytes - bytes_available - file_offset;
-    if (to_fill < 0) {
-        LOG_ERROR(Kernel_Fs, "Dirent may have leaked {} bytes", -to_fill);
-        return bytes_available;
-    }
-    memset(static_cast<u8*>(buf) + bytes_available, 0, to_fill);
-    file_offset += to_fill + bytes_available;
-    return to_fill + bytes_available;
+    s64 to_fill = nbytes - bytes_to_read - file_offset;
+    file_offset += bytes_to_read;
+    if (to_fill <= 0)
+        return bytes_to_read;
+
+    memset(static_cast<u8*>(buf) + bytes_to_read, 0, to_fill);
+    file_offset += to_fill;
+    return to_fill + bytes_to_read;
 }
 
 s64 PfsDirectory::readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) {
