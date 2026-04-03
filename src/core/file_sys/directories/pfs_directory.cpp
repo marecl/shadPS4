@@ -120,7 +120,7 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
 
     read_limit = std::max(this->dirent_cache_bin.size(), read_limit);
 
-    while (buffer_position < this->dirent_cache_bin.size()) {
+    while (buffer_position < read_limit) {
         const PfsDirectoryDirent* pfs_dirent =
             reinterpret_cast<PfsDirectoryDirent*>(this->dirent_cache_bin.data() + buffer_position);
 
