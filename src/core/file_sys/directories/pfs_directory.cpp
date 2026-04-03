@@ -101,6 +101,15 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     if (basep)
         *basep = file_offset;
 
+    // down-aligned apparent end, last crossed sector
+    auto read_limit = Common::AlignDownAligned(this->file_offset + nbytes, 512);
+
+    // offset aligned up = next ceiling to cross (when data will be read at all)
+    if (read_limit < Common::AlignUpAligned(this->file_offset, 512)) {
+        // apparent end is not equal or greater than nearest sector alignment
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    }
+
     // same as others, we just don't need a variable
     if (file_offset >= directory_size)
         return 0;
@@ -108,6 +117,9 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     u64 bytes_written = 0;
     u64 starting_offset = 0;
     u64 buffer_position = 0;
+
+    read_limit = std::max(this->dirent_cache_bin.size(), read_limit);
+
     while (buffer_position < this->dirent_cache_bin.size()) {
         const PfsDirectoryDirent* pfs_dirent =
             reinterpret_cast<PfsDirectoryDirent*>(this->dirent_cache_bin.data() + buffer_position);
