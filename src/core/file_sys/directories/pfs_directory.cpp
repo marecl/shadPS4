@@ -69,26 +69,6 @@ s64 PfsDirectory::read(void* buf, u64 nbytes) {
     return to_fill + bytes_available;
 }
 
-s64 PfsDirectory::readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) {
-    s64 bytes_read = 0;
-    for (s32 i = 0; i < iovcnt; i++) {
-        const s64 result = read(iov[i].iov_base, iov[i].iov_len);
-        if (result < 0) {
-            return result;
-        }
-        bytes_read += result;
-    }
-    return bytes_read;
-}
-
-s64 PfsDirectory::preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt, s64 offset) {
-    const u64 old_file_pointer = file_offset;
-    file_offset = offset;
-    const s64 bytes_read = readv(iov, iovcnt);
-    file_offset = old_file_pointer;
-    return bytes_read;
-}
-
 s32 PfsDirectory::fstat(Libraries::Kernel::OrbisKernelStat* stat) {
     stat->st_mode = 0000777u | 0040000u;
     stat->st_size = directory_size;
@@ -118,7 +98,7 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     u64 starting_offset = 0;
     u64 buffer_position = 0;
 
-    read_limit = std::max(this->dirent_cache_bin.size(), read_limit);
+    read_limit = this->dirent_cache_bin.size()> read_limit?this->dirent_cache_bin.size(): read_limit;
 
     while (buffer_position < read_limit) {
         const PfsDirectoryDirent* pfs_dirent =

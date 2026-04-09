@@ -17,6 +17,7 @@ std::shared_ptr<BaseDirectory> NormalDirectory::Create(std::string_view guest_di
 
 NormalDirectory::NormalDirectory(std::string_view guest_directory)
     : guest_directory(guest_directory) {
+    file_list.reserve(25);
     RebuildDirents();
 }
 
@@ -113,12 +114,11 @@ void NormalDirectory::RebuildDirents() {
     dirent_cache_bin.clear();
     dirent_cache_bin.reserve(512);
 
-    std::vector<std::pair<std::filesystem::path, bool>> file_list{};
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
-    mnt->IterateDirectory(guest_directory, [&file_list](const std::filesystem::path& ent_path,
+    mnt->IterateDirectory(guest_directory, [fl=&file_list](const std::filesystem::path& ent_path,
                                                         const bool ent_is_file) {
-        file_list.emplace_back(ent_path, ent_is_file);
+        fl->emplace_back(ent_path, ent_is_file);
     });
 
     std::ranges::sort(file_list.begin(), file_list.end());

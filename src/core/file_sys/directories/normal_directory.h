@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <filesystem>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -35,9 +36,19 @@ private:
     };
 #pragma pack(pop)
 
+#pragma pack(push, 1)
+    struct {
+        bool is_file;
+        bool is_directory;
+        // ... add more if needed
+        u32 fileno;
+    } DirentEntryMeta;
+#pragma pack(pop)
+
     std::string_view guest_directory{};
     s64 previous_file_offset = -1;
 
-    void RebuildDirents(void);
+    std::vector<std::pair<std::filesystem::path, bool>> file_list{};
+    void RebuildDirents();
 };
 } // namespace Core::Directories

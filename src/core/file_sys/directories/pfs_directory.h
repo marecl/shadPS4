@@ -19,9 +19,6 @@ public:
     ~PfsDirectory() override = default;
 
     virtual s64 read(void* buf, u64 nbytes) override;
-    virtual s64 readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) override;
-    virtual s64 preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt,
-                       s64 offset) override;
     virtual s32 fstat(Libraries::Kernel::OrbisKernelStat* stat) override;
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
