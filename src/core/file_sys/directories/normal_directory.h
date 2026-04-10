@@ -7,6 +7,7 @@
 #include <memory>
 #include <string_view>
 #include <vector>
+#include <unordered_map>
 
 #include "common/alignment.h"
 #include "common/types.h"
@@ -26,7 +27,9 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
-#pragma pack(push, 1)
+    std::unordered_map<std::string,u32>dirent_fileno_cache{};
+
+    #pragma pack(push, 1)
     struct NormalDirectoryDirent {
         u32 d_fileno;
         u16 d_reclen;
@@ -36,19 +39,9 @@ private:
     };
 #pragma pack(pop)
 
-#pragma pack(push, 1)
-    struct {
-        bool is_file;
-        bool is_directory;
-        // ... add more if needed
-        u32 fileno;
-    } DirentEntryMeta;
-#pragma pack(pop)
-
     std::string_view guest_directory{};
     s64 previous_file_offset = -1;
 
-    std::vector<std::pair<std::filesystem::path, bool>> file_list{};
     void RebuildDirents();
 };
 } // namespace Core::Directories
