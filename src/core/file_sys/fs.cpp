@@ -182,10 +182,6 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
     const auto patch_path = GetHostPath(guest_directory, nullptr, HostPathType::Patch);
     const auto mod_path = GetHostPath(guest_directory, nullptr, HostPathType::Mod);
 
-    // Prepend entries for . and .., as both are treated as files on PS4.
-    callback(base_path / ".", false);
-    callback(base_path / "..", false);
-
     // Pass 1: Any files that existed in the base directory, using mod/patch directory if needed.
     if (std::filesystem::exists(base_path)) {
         for (const auto& entry : std::filesystem::directory_iterator(base_path)) {

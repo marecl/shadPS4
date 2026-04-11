@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <ranges>
@@ -13,7 +13,7 @@
 namespace Core::Directories {
 
 std::shared_ptr<BaseDirectory> PfsDirectory::Create(std::string_view guest_directory) {
-    return std::static_pointer_cast<BaseDirectory>(std::make_shared<PfsDirectory>(guest_directory));
+    return std::make_shared<PfsDirectory>(guest_directory);
 }
 
 PfsDirectory::PfsDirectory(std::string_view guest_directory) {
@@ -21,23 +21,29 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
         sizeof(PfsDirectoryDirent::d_fileno) + sizeof(PfsDirectoryDirent::d_type) +
         sizeof(PfsDirectoryDirent::d_namlen) + sizeof(PfsDirectoryDirent::d_reclen);
 
+    real_size = 0;
     dirent_cache_bin.reserve(512);
 
     std::vector<std::pair<std::filesystem::path, bool>> file_list{};
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
-    mnt->IterateDirectory(guest_directory, [&file_list](const std::filesystem::path& ent_path,
-                                                        const bool ent_is_file) {
+    mnt->IterateDirectory(guest_directory, [&file_list, this](const std::filesystem::path& ent_path,
+                                                              const bool ent_is_file) {
         file_list.emplace_back(ent_path, ent_is_file);
+        this->dirent_fileno_cache.emplace(ent_path.filename().string(),
+                                          BaseDirectory::next_fileno());
     });
 
     std::ranges::sort(file_list.begin(), file_list.end());
+    file_list.emplace(file_list.begin(), "..", false);
+    file_list.emplace(file_list.begin(), ".", false);
 
     for (const auto& [file_path, is_file] : file_list) {
         PfsDirectoryDirent tmp{};
         std::string leaf(file_path.filename().string());
+        auto elem = dirent_fileno_cache.find(leaf);
 
-        tmp.d_fileno = BaseDirectory::next_fileno();
+        tmp.d_fileno = elem->second;
         tmp.d_namlen = leaf.size();
         strncpy(tmp.d_name, leaf.data(), tmp.d_namlen + 1);
         tmp.d_type = is_file ? 2 : 4;
@@ -45,27 +51,26 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
         auto dirent_ptr = reinterpret_cast<const u8*>(&tmp);
 
         dirent_cache_bin.insert(dirent_cache_bin.end(), dirent_ptr, dirent_ptr + tmp.d_reclen);
+        real_size += tmp.d_reclen;
     }
 
     directory_size = Common::AlignUp(dirent_cache_bin.size(), 0x10000);
 }
 
-s64 PfsDirectory::read(void* buf, u64 nbytes) {
-    s64 bytes_available = this->dirent_cache_bin.size() - file_offset;
+s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
+    s64 bytes_available = this->dirent_cache_bin.size() - offset;
     if (bytes_available <= 0)
         return 0;
 
     bytes_available = std::min<s64>(bytes_available, static_cast<s64>(nbytes));
-    memcpy(buf, this->dirent_cache_bin.data() + file_offset, bytes_available);
+    memcpy(buf, this->dirent_cache_bin.data() + offset, bytes_available);
     // wypelnia tylko przy pierwszym odczycie i wyrownuje do chuj wie czego
     // ale to troche mniej danych jest tylko do pierwszego wyrownania!!!
-    file_offset += bytes_available;
     s64 to_fill = nbytes - bytes_available;
-    if (to_fill <= file_offset)
+    if (to_fill <= (offset + bytes_available))
         return bytes_available;
 
     memset(static_cast<u8*>(buf) + bytes_available, 0, to_fill);
-    file_offset += to_fill;
     return to_fill + bytes_available;
 }
 
@@ -89,6 +94,7 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         // apparent end is not equal or greater than nearest sector alignment
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
+    read_limit = std::min(this->real_size, read_limit);
 
     // same as others, we just don't need a variable
     if (file_offset >= directory_size)
@@ -97,8 +103,6 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     u64 bytes_written = 0;
     u64 starting_offset = 0;
     u64 buffer_position = 0;
-
-    read_limit = this->dirent_cache_bin.size()> read_limit?this->dirent_cache_bin.size(): read_limit;
 
     while (buffer_position < read_limit) {
         const PfsDirectoryDirent* pfs_dirent =

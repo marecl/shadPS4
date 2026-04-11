@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/logging/log.h"
@@ -9,9 +9,19 @@
 
 namespace Core::Directories {
 
-BaseDirectory::BaseDirectory() = default;
+BaseDirectory::BaseDirectory() {
+    this->dirent_fileno_cache.emplace(".", BaseDirectory::next_fileno());  // can be random
+    this->dirent_fileno_cache.emplace("..", BaseDirectory::next_fileno()); // should not be random
+};
 
 BaseDirectory::~BaseDirectory() = default;
+
+s64 BaseDirectory::read(void* buf, u64 nbytes) {
+    auto pread_result = this->pread(buf, nbytes, this->file_offset);
+    if (pread_result >= 0)
+        this->file_offset += pread_result;
+    return pread_result;
+}
 
 s64 BaseDirectory::readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) {
     s64 bytes_read = 0;
@@ -35,7 +45,7 @@ s64 BaseDirectory::preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 io
 
 s64 BaseDirectory::lseek(s64 offset, s32 whence) {
 
-    s64 file_offset_new = ((0 ==  whence) * offset) + ((1 == whence) * (file_offset + offset)) +
+    s64 file_offset_new = ((0 == whence) * offset) + ((1 == whence) * (file_offset + offset)) +
                           ((2 == whence) * (directory_size + offset));
     if (file_offset_new < 0)
         return ORBIS_KERNEL_ERROR_EINVAL;

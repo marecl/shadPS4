@@ -1,13 +1,9 @@
-// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
 
 #include <filesystem>
-#include <memory>
-#include <string_view>
-#include <vector>
-#include <unordered_map>
 
 #include "common/alignment.h"
 #include "common/types.h"
@@ -22,14 +18,12 @@ public:
     explicit NormalDirectory(std::string_view guest_path);
     ~NormalDirectory() override = default;
 
-    virtual s64 read(void* buf, u64 nbytes) override;
+    virtual s64 pread(void* buf, u64 nbytes, s64 offset) override;
     virtual s32 fstat(Libraries::Kernel::OrbisKernelStat* stat) override;
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
-    std::unordered_map<std::string,u32>dirent_fileno_cache{};
-
-    #pragma pack(push, 1)
+#pragma pack(push, 1)
     struct NormalDirectoryDirent {
         u32 d_fileno;
         u16 d_reclen;
@@ -39,8 +33,8 @@ private:
     };
 #pragma pack(pop)
 
-    std::string_view guest_directory{};
-    s64 previous_file_offset = -1;
+    const std::string guest_directory{};
+    std::filesystem::file_time_type previous_write_time{};
 
     void RebuildDirents();
 };

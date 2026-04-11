@@ -18,6 +18,7 @@
 #include "core/file_sys/devices/rng_device.h"
 #include "core/file_sys/devices/srandom_device.h"
 #include "core/file_sys/devices/urandom_device.h"
+#include "core/file_sys/directories/cache.h"
 #include "core/file_sys/directories/normal_directory.h"
 #include "core/file_sys/directories/pfs_directory.h"
 #include "core/file_sys/fs.h"
@@ -196,13 +197,16 @@ s32 PS4_SYSV_ABI open(const char* raw_path, s32 flags, u16 mode) {
             return -1;
         }
 
+        auto* dir_cache = Common::Singleton<Core::Directories::DirectoryCache>::Instance();
+
         file->type = Core::FileSys::FileType::Directory;
         file->is_opened = true;
         if (file->m_guest_name.starts_with("/app0")) {
             // TODO: Properly identify type for paths like "/app0/.."
-            file->directory = Core::Directories::PfsDirectory::Create(file->m_guest_name);
+            file->directory = dir_cache->Get<Core::Directories::PfsDirectory>(file->m_guest_name);
         } else {
-            file->directory = Core::Directories::NormalDirectory::Create(file->m_guest_name);
+            file->directory =
+                dir_cache->Get<Core::Directories::NormalDirectory>(file->m_guest_name);
         }
     } else {
         file->type = Core::FileSys::FileType::Regular;
@@ -608,6 +612,9 @@ s32 PS4_SYSV_ABI posix_mkdir(const char* path, u16 mode) {
         *__Error() = POSIX_ENOENT;
         return -1;
     }
+
+    auto* dir_cache = Common::Singleton<Core::Directories::DirectoryCache>::Instance();
+    dir_cache->Get<Core::Directories::NormalDirectory>(std::string(path));
     return ORBIS_OK;
 }
 
@@ -652,6 +659,9 @@ s32 PS4_SYSV_ABI posix_rmdir(const char* path) {
         *__Error() = POSIX_EIO;
         return -1;
     }
+
+    auto* dir_cache = Common::Singleton<Core::Directories::DirectoryCache>::Instance();
+    dir_cache->Drop(std::string(path));
     return ORBIS_OK;
 }
 

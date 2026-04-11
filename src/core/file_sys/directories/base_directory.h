@@ -1,9 +1,10 @@
-// SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
+// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
 
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "common/types.h"
@@ -27,23 +28,27 @@ protected:
         return ++fileno_pool;
     }
 
-    u64 file_offset = 0;
-    u64 directory_size = 0;
+    u64 file_offset{0};
+    u64 directory_size{0};
     std::vector<u8> dirent_cache_bin{};
+    std::unordered_map<std::string, u32> dirent_fileno_cache{};
 
 public:
     explicit BaseDirectory();
-
     virtual ~BaseDirectory() = 0;
 
-    virtual s64 read(void* buf, u64 nbytes) {
+    virtual s64 pread(void* buf, u64 nbytes, s64 offset) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
-
+    virtual s64 read(void* buf, u64 nbytes);
     virtual s64 readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt);
     virtual s64 preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt, s64 offset);
 
     virtual s64 write(const void* buf, u64 nbytes) {
+        return ORBIS_KERNEL_ERROR_EBADF;
+    }
+
+    virtual s64 pwrite(const void* buf, u64 nbytes, s64 offset) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
 
