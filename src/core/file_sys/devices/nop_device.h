@@ -34,10 +34,6 @@ public:
         return 0;
     }
 
-    s64 lseek(s64 offset, s32 whence) override {
-        return 0;
-    }
-
     s64 read(void* buf, u64 nbytes) override {
         return 0;
     }

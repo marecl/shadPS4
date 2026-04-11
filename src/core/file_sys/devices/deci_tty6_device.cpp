@@ -35,11 +35,6 @@ s64 DeciTty6Device::preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 i
     return 0;
 }
 
-s64 DeciTty6Device::lseek(s64 offset, s32 whence) {
-    LOG_ERROR(Kernel_Fs, "(STUBBED) called");
-    return 0;
-}
-
 s64 DeciTty6Device::read(void* buf, u64 nbytes) {
     LOG_ERROR(Kernel_Fs, "(STUBBED) called");
     return 0;

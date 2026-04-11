@@ -44,9 +44,7 @@ public:
         return ORBIS_KERNEL_ERROR_EBADF;
     }
 
-    virtual s64 lseek(s64 offset, int whence) {
-        return ORBIS_KERNEL_ERROR_EBADF;
-    }
+    virtual s64 lseek(s64 offset, int whence) final;
 
     virtual s64 read(void* buf, u64 nbytes) {
         return ORBIS_KERNEL_ERROR_EBADF;
@@ -71,6 +69,9 @@ public:
     virtual s64 pwrite(const void* buf, u64 nbytes, s64 offset) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
+
+private:
+    u64 file_offset{0};
 };
 
 } // namespace Core::Devices

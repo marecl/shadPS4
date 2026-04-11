@@ -38,11 +38,6 @@ s64 URandomDevice::preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 io
     return 0;
 }
 
-s64 URandomDevice::lseek(s64 offset, s32 whence) {
-    LOG_ERROR(Kernel_Fs, "(STUBBED) called");
-    return 0;
-}
-
 s64 URandomDevice::read(void* buf, u64 nbytes) {
     auto rbuf = static_cast<s8*>(buf);
     for (u64 i = 0; i < nbytes; i++) {
