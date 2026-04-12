@@ -60,8 +60,8 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
 s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
     if (this->file_offset >= this->directory_size)
         return 0;
-        
-        // could simplify it, but we are not going to allocate entire 64k blocks for a single directory
+
+    // could simplify it, but we are not going to allocate entire 64k blocks for a single directory
     s64 data_to_write = this->dirent_cache_bin.size() - offset;
     if (data_to_write < 0)
         data_to_write = 0;
@@ -81,6 +81,17 @@ s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
     memset(static_cast<u8*>(buf) + data_to_write, 0, data_to_fill);
 
     return data_to_write + data_to_fill;
+}
+
+s64 PfsDirectory::lseek(s64 offset, s32 whence) {
+    BaseDirectory::lseek(offset, whence);
+    // refresh here, so correct offset is cached
+    // we're spending a bit more time here, but lseek() isn't called that often
+    // would be a waste if done every time getdents is called
+    this->suggested_file_offset =
+        this->file_offset + backtrack_dirent(this->dirent_cache_bin.data(), this->file_offset,
+                                             this->dirent_cache_bin.size());
+    return this->file_offset;
 }
 
 s32 PfsDirectory::fstat(Libraries::Kernel::OrbisKernelStat* stat) {
@@ -104,31 +115,28 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
 
-    // same as others, we just don't need a variable
-    if (this->file_offset > this->dirent_cache_bin.size()) {
-        this->file_offset = this->directory_size;
-        return 0;
-    }
+    // navigate to latest backtracked dirent
+    if (this->suggested_file_offset < this->file_offset)
+        this->file_offset = this->suggested_file_offset;
 
     read_limit = std::min(this->dirent_cache_bin.size() - this->file_offset, read_limit);
+    read_limit = std::min(nbytes, read_limit);
     u64 bytes_written = 0;
-    u64 starting_offset = 0;
-    u64 buffer_position = 0;
+    u64 buffer_position = this->file_offset;
 
-    while (buffer_position < read_limit) {
+    // same as others, we just don't need a variable
+    if (this->file_offset >= this->dirent_cache_bin.size()) {
+        this->file_offset = this->directory_size;
+        goto pfs_getdents_end;
+    }
+
+    while (bytes_written < read_limit) {
         const PfsDirectoryDirent* pfs_dirent =
             reinterpret_cast<PfsDirectoryDirent*>(this->dirent_cache_bin.data() + buffer_position);
 
         // bad, incomplete or OOB entry
         if (pfs_dirent->d_namlen == 0)
             break;
-
-        if (starting_offset < file_offset) {
-            // reading starts from the nearest full dirent
-            starting_offset += pfs_dirent->d_reclen;
-            buffer_position = bytes_written + starting_offset;
-            continue;
-        }
 
         if ((bytes_written + pfs_dirent->d_reclen) > nbytes)
             // dirents are aligned to the last full one
@@ -151,12 +159,57 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
 
         memcpy(static_cast<u8*>(buf) + bytes_written, &normal_dirent, normal_dirent.d_reclen);
         bytes_written += normal_dirent.d_reclen;
-        buffer_position = bytes_written + starting_offset;
+        buffer_position += normal_dirent.d_reclen;
     }
 
-    file_offset = (buffer_position >= this->dirent_cache_bin.size())
-                      ? directory_size
-                      : (file_offset + bytes_written);
+    this->file_offset = (buffer_position >= this->dirent_cache_bin.size())
+                            ? directory_size
+                            : (file_offset + bytes_written);
+pfs_getdents_end:
+    this->suggested_file_offset = this->file_offset;
     return bytes_written;
 }
+
+bool PfsDirectory::detect_dirent(const void* buffer, u64 buffer_length) {
+    const PfsDirectoryDirent* dirent = reinterpret_cast<const PfsDirectoryDirent*>(buffer);
+
+    // these are ordered by how likely it is to fail first
+
+    // size aligned to 8 bytes
+    if ((dirent->d_reclen & 0x07) != 0)
+        return false;
+    // valid sizes is 24-272
+    if (dirent->d_type > 15)
+        return false;
+    if (dirent->d_reclen > 272)
+        return false;
+    if (dirent->d_reclen < 24)
+        return false;
+    if (std::min(buffer_length - 16, static_cast<u64>(dirent->d_namlen)) > 255)
+        return false;
+
+    return true;
+}
+
+// return relative position of a backtracked dirent
+// always negative lmao
+// 5-6it for short names, 34 at most for maxed out dirent
+// but at one point certainly faster for huge directories
+s64 PfsDirectory::backtrack_dirent(const void* buffer, u64 target_offset, u64 buffer_length) {
+    // can't go further back, just start over
+    if (target_offset < 272)
+        return -target_offset;
+
+    u64 offset{}; // max dirent size, no point in looking further back
+
+    for (offset = target_offset; offset >= (target_offset - 272); offset -= 8) {
+        if (!detect_dirent(reinterpret_cast<const u8*>(buffer) + offset,
+                             std::min(buffer_length, (u64)255)))
+            continue;
+        break;
+    }
+
+    return offset - target_offset;
+}
+
 } // namespace Core::Directories

@@ -12,6 +12,13 @@
 
 namespace Core::Directories {
 
+#define BP(x)                                                                                      \
+    {                                                                                              \
+        for (u16 i = 0; i < 1; i++) {                                                              \
+            continue;                                                                              \
+        }                                                                                          \
+    }
+
 std::shared_ptr<BaseDirectory> NormalDirectory::Create(std::string_view guest_directory) {
     return std::make_shared<NormalDirectory>(guest_directory);
 }
@@ -127,6 +134,7 @@ void NormalDirectory::RebuildDirents() {
                                           BaseDirectory::next_fileno());
     });
 
+    u64 fcnt = 0;
     for (const auto& [file_path, is_file] : file_list) {
         NormalDirectoryDirent tmp{};
         std::string leaf(file_path.filename().string());
@@ -161,6 +169,7 @@ void NormalDirectory::RebuildDirents() {
         last_reclen_offset = dirent_offset + 4;
         memcpy(dirent_cache_bin.data() + dirent_offset, &tmp, tmp.d_reclen);
         dirent_offset += tmp.d_reclen;
+        fcnt++;
     }
 
     // last reclen, as before
@@ -169,6 +178,18 @@ void NormalDirectory::RebuildDirents() {
 
     // i have no idea if this is the case, but lseek returns size aligned to 512
     directory_size = dirent_cache_bin.size();
+
+    // sanity check. can't do memory view in a vector :<
+    if (directory_size >= 65536)
+        return;
+    char _buffer[65536]{'A'};
+
+    LOG_ERROR(Kernel_Fs, "Refreshed directory: {} , {} entries indexed , size {}",
+              this->guest_directory, fcnt, this->directory_size);
+    memcpy(_buffer, this->dirent_cache_bin.data(), this->directory_size);
+
+    BP();
+    return;
 }
 
 } // namespace Core::Directories

@@ -19,10 +19,15 @@ public:
     ~PfsDirectory() override = default;
 
     virtual s64 pread(void* buf, u64 nbytes, s64 offset) override;
+    virtual s64 lseek(s64 offset, s32 whence) override;
     virtual s32 fstat(Libraries::Kernel::OrbisKernelStat* stat) override;
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
+    u64 suggested_file_offset{};
+    bool detect_dirent(const void* buffer, u64 buffer_length);
+    s64 backtrack_dirent(const void* buffer, u64 target_offset, u64 buffer_length);
+
 #pragma pack(push, 1)
     struct PfsDirectoryDirent {
         u32 d_fileno;
