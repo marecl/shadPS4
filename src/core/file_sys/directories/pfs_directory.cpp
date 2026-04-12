@@ -21,7 +21,7 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
         sizeof(PfsDirectoryDirent::d_fileno) + sizeof(PfsDirectoryDirent::d_type) +
         sizeof(PfsDirectoryDirent::d_namlen) + sizeof(PfsDirectoryDirent::d_reclen);
 
-    real_size = 0;
+    directory_size = 0;
     dirent_cache_bin.reserve(512);
 
     std::vector<std::pair<std::filesystem::path, bool>> file_list{};
@@ -51,27 +51,36 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
         auto dirent_ptr = reinterpret_cast<const u8*>(&tmp);
 
         dirent_cache_bin.insert(dirent_cache_bin.end(), dirent_ptr, dirent_ptr + tmp.d_reclen);
-        real_size += tmp.d_reclen;
+        directory_size += tmp.d_reclen;
     }
 
-    directory_size = Common::AlignUp(dirent_cache_bin.size(), 0x10000);
+    directory_size = Common::AlignUpAligned(dirent_cache_bin.size(), 0x10000);
 }
 
 s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
-    s64 bytes_available = this->dirent_cache_bin.size() - offset;
-    if (bytes_available <= 0)
+    if (this->file_offset >= this->directory_size)
         return 0;
+        
+        // could simplify it, but we are not going to allocate entire 64k blocks for a single directory
+    s64 data_to_write = this->dirent_cache_bin.size() - offset;
+    if (data_to_write < 0)
+        data_to_write = 0;
+    data_to_write = std::min(data_to_write, static_cast<s64>(nbytes));
 
-    bytes_available = std::min<s64>(bytes_available, static_cast<s64>(nbytes));
-    memcpy(buf, this->dirent_cache_bin.data() + offset, bytes_available);
-    // wypelnia tylko przy pierwszym odczycie i wyrownuje do chuj wie czego
-    // ale to troche mniej danych jest tylko do pierwszego wyrownania!!!
-    s64 to_fill = nbytes - bytes_available;
-    if (to_fill <= (offset + bytes_available))
-        return bytes_available;
+    s64 data_to_fill = nbytes - data_to_write;
+    if (data_to_fill < 0)
+        data_to_fill = 0;
 
-    memset(static_cast<u8*>(buf) + bytes_available, 0, to_fill);
-    return to_fill + bytes_available;
+    s64 total_available = this->directory_size - offset;
+    if (total_available > data_to_write)
+        total_available -= data_to_write;
+    if (total_available < data_to_fill)
+        data_to_fill = total_available;
+
+    memcpy(buf, this->dirent_cache_bin.data() + offset, data_to_write);
+    memset(static_cast<u8*>(buf) + data_to_write, 0, data_to_fill);
+
+    return data_to_write + data_to_fill;
 }
 
 s32 PfsDirectory::fstat(Libraries::Kernel::OrbisKernelStat* stat) {
@@ -94,12 +103,14 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         // apparent end is not equal or greater than nearest sector alignment
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
-    read_limit = std::min(this->real_size, read_limit);
 
     // same as others, we just don't need a variable
-    if (file_offset >= directory_size)
+    if (this->file_offset > this->dirent_cache_bin.size()) {
+        this->file_offset = this->directory_size;
         return 0;
+    }
 
+    read_limit = std::min(this->dirent_cache_bin.size() - this->file_offset, read_limit);
     u64 bytes_written = 0;
     u64 starting_offset = 0;
     u64 buffer_position = 0;

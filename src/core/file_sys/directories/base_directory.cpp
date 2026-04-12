@@ -12,6 +12,7 @@ namespace Core::Directories {
 BaseDirectory::BaseDirectory() {
     this->dirent_fileno_cache.emplace(".", BaseDirectory::next_fileno());  // can be random
     this->dirent_fileno_cache.emplace("..", BaseDirectory::next_fileno()); // should not be random
+    this->file_offset = 0;
 };
 
 BaseDirectory::~BaseDirectory() = default;
@@ -24,6 +25,9 @@ s64 BaseDirectory::read(void* buf, u64 nbytes) {
 }
 
 s64 BaseDirectory::readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) {
+    if (this->file_offset >= this->directory_size)
+        return 0;
+
     s64 bytes_read = 0;
     for (s32 i = 0; i < iovcnt; i++) {
         const s64 result = read(iov[i].iov_base, iov[i].iov_len);
@@ -36,6 +40,9 @@ s64 BaseDirectory::readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iov
 }
 
 s64 BaseDirectory::preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt, s64 offset) {
+    if (this->file_offset >= this->directory_size)
+        return 0;
+
     const u64 old_file_pointer = file_offset;
     file_offset = offset;
     const s64 bytes_read = readv(iov, iovcnt);

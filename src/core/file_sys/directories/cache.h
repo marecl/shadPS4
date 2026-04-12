@@ -20,8 +20,10 @@ public:
         static_assert(std::is_base_of<BaseDirectory, T>::value);
 
         auto found_elem = this->cache.find(guest_path);
-        if (this->cache.end() != found_elem)
+        if (this->cache.end() != found_elem) {
+            found_elem->second->__reset();
             return found_elem->second;
+        }
 
         auto [new_elem, _] = this->cache.emplace(guest_path, T::Create(guest_path));
         return new_elem->second;

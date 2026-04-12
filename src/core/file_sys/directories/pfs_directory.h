@@ -23,8 +23,6 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
-    size_t real_size{};
-
 #pragma pack(push, 1)
     struct PfsDirectoryDirent {
         u32 d_fileno;

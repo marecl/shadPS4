@@ -47,15 +47,12 @@ public:
     virtual s64 write(const void* buf, u64 nbytes) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
-
     virtual s64 pwrite(const void* buf, u64 nbytes, s64 offset) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
-
     virtual s64 writev(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
-
     virtual s64 pwritev(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt, s64 offset) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
@@ -68,6 +65,10 @@ public:
 
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) {
         return ORBIS_KERNEL_ERROR_EBADF;
+    }
+
+    void __reset() {
+        this->file_offset = 0;
     }
 };
 

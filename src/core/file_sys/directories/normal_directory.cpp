@@ -24,16 +24,17 @@ NormalDirectory::NormalDirectory(std::string_view guest_directory)
 s64 NormalDirectory::pread(void* buf, u64 nbytes, s64 offset) {
     RebuildDirents();
 
+    if (this->file_offset >= this->directory_size)
+        return 0;
+
     // data is contiguous. read goes like any regular file would: start at offset, read n bytes
     // output is always aligned up to 512 bytes with 0s
     // offset - classic. however at the end of read any unused (exceeding dirent buffer size) buffer
     // space will be left untouched
     // reclen always sums up to end of current alignment
 
-    s64 bytes_available = this->dirent_cache_bin.size() - offset;
-    if (bytes_available <= 0)
-        return 0;
-    bytes_available = std::min<s64>(bytes_available, static_cast<s64>(nbytes));
+    s64 bytes_available =
+        std::min<s64>(this->dirent_cache_bin.size() - offset, static_cast<s64>(nbytes));
 
     // data
     memcpy(buf, this->dirent_cache_bin.data() + offset, bytes_available);
@@ -167,7 +168,7 @@ void NormalDirectory::RebuildDirents() {
         next_ceiling - dirent_offset;
 
     // i have no idea if this is the case, but lseek returns size aligned to 512
-    directory_size = next_ceiling;
+    directory_size = dirent_cache_bin.size();
 }
 
 } // namespace Core::Directories
