@@ -58,24 +58,17 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
 }
 
 s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
-    if (this->file_offset >= this->directory_size)
+    s64 total_available = this->directory_size - offset;
+    if (total_available <= 0)
         return 0;
 
-    // could simplify it, but we are not going to allocate entire 64k blocks for a single directory
-    s64 data_to_write = this->dirent_cache_bin.size() - offset;
-    if (data_to_write < 0)
-        data_to_write = 0;
-    data_to_write = std::min(data_to_write, static_cast<s64>(nbytes));
-
-    s64 data_to_fill = nbytes - data_to_write;
+    s64 total_buffer_available = this->dirent_cache_bin.size() - offset;
+    if (total_buffer_available < 0)
+        total_buffer_available = 0;
+    s64 data_to_write = std::min(static_cast<s64>(nbytes), total_buffer_available);
+    s64 data_to_fill = std::min(static_cast<s64>(nbytes), total_available) - data_to_write;
     if (data_to_fill < 0)
         data_to_fill = 0;
-
-    s64 total_available = this->directory_size - offset;
-    if (total_available > data_to_write)
-        total_available -= data_to_write;
-    if (total_available < data_to_fill)
-        data_to_fill = total_available;
 
     memcpy(buf, this->dirent_cache_bin.data() + offset, data_to_write);
     memset(static_cast<u8*>(buf) + data_to_write, 0, data_to_fill);
