@@ -107,20 +107,26 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         *basep = file_offset;
 
     // down-aligned apparent end, last crossed sector
-    auto read_limit = Common::AlignDownAligned(this->file_offset + nbytes, 512);
+    auto apparent_end = this->file_offset + nbytes;
+    auto apparent_end_down = Common::AlignDownAligned(apparent_end, 512);
+    auto apparent_end_up = Common::AlignUpAligned(apparent_end, 512);
+    auto file_offset_aligned = Common::AlignDownAligned(this->file_offset, 512);
 
-    // offset aligned up = next ceiling to cross (when data will be read at all)
-    if (read_limit < Common::AlignUpAligned(this->file_offset, 512)) {
-        // apparent end is not equal or greater than nearest sector alignment
+    auto file_offset_up = Common::AlignUpAligned(this->file_offset, 512);
+
+    if (apparent_end_up == file_offset_up)
         return ORBIS_KERNEL_ERROR_EINVAL;
-    }
+
+    if (nbytes < (file_offset_up - this->file_offset))
+        return 0;
 
     // navigate to latest backtracked dirent
     if (this->suggested_file_offset < this->file_offset)
         this->file_offset = this->suggested_file_offset;
 
-    read_limit = std::min(this->dirent_cache_bin.size() - this->file_offset, read_limit);
-    read_limit = std::min(nbytes, read_limit);
+    apparent_end_down =
+        std::min(this->dirent_cache_bin.size() - this->file_offset, apparent_end_down);
+    apparent_end_down = std::min(nbytes, apparent_end_down);
     u64 bytes_written = 0;
     u64 buffer_position = this->file_offset;
 
@@ -130,7 +136,7 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         goto pfs_getdents_end;
     }
 
-    while (bytes_written < read_limit) {
+    while (bytes_written < apparent_end_down) {
         const PfsDirectoryDirent* pfs_dirent =
             reinterpret_cast<PfsDirectoryDirent*>(this->dirent_cache_bin.data() + buffer_position);
 
@@ -204,7 +210,7 @@ s64 PfsDirectory::backtrack_dirent(const void* buffer, u64 target_offset, u64 bu
 
     for (offset = target_offset; offset >= (target_offset - 272); offset -= 8) {
         if (!detect_dirent(reinterpret_cast<const u8*>(buffer) + offset,
-                             std::min(buffer_length, (u64)255)))
+                           std::min(buffer_length, (u64)255)))
             continue;
         break;
     }
