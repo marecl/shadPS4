@@ -14,7 +14,7 @@ namespace Core::Directories {
 
 class PfsDirectory final : public BaseDirectory {
 public:
-    static std::shared_ptr<BaseDirectory> Create(std::string_view guest_path);
+    static std::shared_ptr<PfsDirectory> Create(std::string_view guest_path);
     explicit PfsDirectory(std::string_view guest_path);
     ~PfsDirectory() override = default;
 

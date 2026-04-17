@@ -19,7 +19,7 @@ namespace Core::Directories {
         }                                                                                          \
     }
 
-std::shared_ptr<BaseDirectory> NormalDirectory::Create(std::string_view guest_directory) {
+std::shared_ptr<NormalDirectory> NormalDirectory::Create(std::string_view guest_directory) {
     return std::make_shared<NormalDirectory>(guest_directory);
 }
 

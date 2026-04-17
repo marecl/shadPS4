@@ -12,7 +12,7 @@
 
 namespace Core::Directories {
 
-std::shared_ptr<BaseDirectory> PfsDirectory::Create(std::string_view guest_directory) {
+std::shared_ptr<PfsDirectory> PfsDirectory::Create(std::string_view guest_directory) {
     return std::make_shared<PfsDirectory>(guest_directory);
 }
 

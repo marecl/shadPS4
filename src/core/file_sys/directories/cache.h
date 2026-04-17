@@ -12,12 +12,13 @@ namespace Core::Directories {
 
 class DirectoryCache {
 public:
-    explicit DirectoryCache();
-    ~DirectoryCache();
+    explicit DirectoryCache() = default;
+    ~DirectoryCache() = default;
 
     template <typename T>
     std::shared_ptr<BaseDirectory> Get(const std::string& guest_path) {
-        static_assert(std::is_base_of<BaseDirectory, T>::value);
+        static_assert(std::is_base_of<BaseDirectory, T>::value,
+                      "Requested type is incompatible with BaseDirectory");
 
         auto found_elem = this->cache.find(guest_path);
         if (this->cache.end() != found_elem) {
@@ -29,7 +30,10 @@ public:
         return new_elem->second;
     }
 
-    bool Drop(const std::string& guest_path);
+    bool Drop(const std::string& guest_path) {
+        auto ret = this->cache.erase(guest_path);
+        return ret == 1;
+    }
 
 private:
     std::unordered_map<std::string, std::shared_ptr<BaseDirectory>> cache{};

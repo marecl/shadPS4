@@ -14,7 +14,7 @@ namespace Core::Directories {
 
 class NormalDirectory final : public BaseDirectory {
 public:
-    static std::shared_ptr<BaseDirectory> Create(std::string_view guest_path);
+    static std::shared_ptr<NormalDirectory> Create(std::string_view guest_path);
     explicit NormalDirectory(std::string_view guest_path);
     ~NormalDirectory() override = default;
 

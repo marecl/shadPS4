@@ -811,7 +811,6 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/file_sys/devices/srandom_device.h
          src/core/file_sys/directories/base_directory.cpp
          src/core/file_sys/directories/base_directory.h
-         src/core/file_sys/directories/cache.cpp
          src/core/file_sys/directories/cache.h
          src/core/file_sys/directories/normal_directory.cpp
          src/core/file_sys/directories/normal_directory.h

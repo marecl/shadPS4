@@ -3,12 +3,10 @@
 
 #pragma once
 
-#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 #include "common/types.h"
-#include "common/va_ctx.h"
 #include "core/libraries/kernel/file_system.h"
 #include "core/libraries/kernel/orbis_error.h"
 
@@ -22,10 +20,9 @@ namespace Core::Directories {
 
 class BaseDirectory {
 protected:
-    static inline u32 fileno_pool{10};
-
     static u32 next_fileno() {
-        return ++fileno_pool;
+        static u32 pool = 10;
+        return ++pool;
     }
 
     u64 file_offset{0};
@@ -35,7 +32,7 @@ protected:
 
 public:
     explicit BaseDirectory();
-    virtual ~BaseDirectory() = 0;
+    virtual ~BaseDirectory();
 
     virtual s64 pread(void* buf, u64 nbytes, s64 offset) {
         return ORBIS_KERNEL_ERROR_EBADF;
