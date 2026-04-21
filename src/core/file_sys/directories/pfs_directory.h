@@ -5,10 +5,8 @@
 
 #include <memory>
 #include <string_view>
-#include <vector>
 #include "common/types.h"
 #include "core/file_sys/directories/base_directory.h"
-#include "core/libraries/kernel/orbis_error.h"
 
 namespace Core::Directories {
 
@@ -25,8 +23,8 @@ public:
 
 private:
     u64 suggested_file_offset{};
-    bool detect_dirent(const void* buffer, u64 buffer_length);
-    s64 backtrack_dirent(const void* buffer, u64 target_offset, u64 buffer_length);
+    s64 nearest_dirent(const void* buffer, u64 target_offset, u64 buffer_length);
+    s64 validate_dirent(const void* buffer, u64 buffer_length);
 
 #pragma pack(push, 1)
     struct PfsDirectoryDirent {

@@ -5,10 +5,8 @@
 
 #include <filesystem>
 
-#include "common/alignment.h"
 #include "common/types.h"
 #include "core/file_sys/directories/base_directory.h"
-#include "core/libraries/kernel/orbis_error.h"
 
 namespace Core::Directories {
 

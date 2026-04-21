@@ -169,25 +169,56 @@ pfs_getdents_end:
     return bytes_written;
 }
 
-bool PfsDirectory::detect_dirent(const void* buffer, u64 buffer_length) {
-    const PfsDirectoryDirent* dirent = reinterpret_cast<const PfsDirectoryDirent*>(buffer);
+// -1 on not found
+bool PfsDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
+    // max size is 272, last 23 bytes are never starting a dirent
+    s64 offset_adj = ISAL(offset, 8) ? offset : ALUP(offset, 8);
+    s64 max_advance = std::min(size - offset_adj, s64(272));
+    if (max_advance < 24)
+        return -2;
 
-    // these are ordered by how likely it is to fail first
+    s64 status{};
 
-    // size aligned to 8 bytes
+    for (s64 out_offset = offset_adj; out_offset <= offset_adj + max_advance; out_offset += 8) {
+        const OrbisInternals::FolderDirent* tested_dirent =
+            reinterpret_cast<const OrbisInternals::FolderDirent*>(buffer + out_offset);
+        status = validate_pfs_getdirentries_dirent(tested_dirent);
+        LogWarning(GetSt(Style::BOLD), "Testing", out_offset - offset, GetSt(Style::RESET), "=",
+                   GetSt(Style::FG_MAGENTA), status);
+
+        if (status < 0)
+            continue;
+
+        // LogError("Found a match forward at", out_offset);
+        return out_offset - offset;
+    }
+
+    // LogError("No match");
+    return status;
+}
+
+s64 PfsDirectory::validate_dirent(PfsDirectoryDirent* dirent) {
+    if (dirent->d_fileno == 0)
+        return -10;
+    if (Common::IsAligned(16 + dirent->d_namlen + 1, 8) != dirent->d_reclen)
+        return -11;
+    // these don't fail so often
+    if (dirent->d_namlen == 0)
+        return -12;
+    if (dirent->d_type == 0)
+        return -13;
+    if (dirent->d_reclen == 0)
+        return -14;
     if ((dirent->d_reclen & 0x07) != 0)
-        return false;
-    // valid sizes is 24-272
+        return -15;
+    if (dirent->d_reclen < 24 || dirent->d_reclen > 272)
+        return -16;
     if (dirent->d_type > 15)
-        return false;
-    if (dirent->d_reclen > 272)
-        return false;
-    if (dirent->d_reclen < 24)
-        return false;
-    if (std::min(buffer_length - 16, static_cast<u64>(dirent->d_namlen)) > 255)
-        return false;
-
-    return true;
+        return -17;
+    if (strnlen(dirent->d_name, 255) != dirent->d_namlen)
+        return -18;
+    return 1;
+}
 }
 
 // return relative position of a backtracked dirent

@@ -4,7 +4,6 @@
 #include <filesystem>
 
 #include "common/alignment.h"
-#include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/file_sys/directories/normal_directory.h"
