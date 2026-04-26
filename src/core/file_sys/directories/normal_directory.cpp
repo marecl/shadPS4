@@ -71,9 +71,9 @@ s64 NormalDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     s64 dirent_buffer_offset = 0;
     s64 aligned_count = Common::AlignDown(nbytes, 512);
 
-    const u8* dirent_buffer = this->dirent_cache_bin.data();
+    const char* dirent_buffer = this->dirent_cache_bin.data();
     while (dirent_buffer_offset < this->dirent_cache_bin.size()) {
-        const u8* normal_dirent_ptr = dirent_buffer + dirent_buffer_offset;
+        const char* normal_dirent_ptr = dirent_buffer + dirent_buffer_offset;
         const NormalDirectoryDirent* normal_dirent =
             reinterpret_cast<const NormalDirectoryDirent*>(normal_dirent_ptr);
         auto d_reclen = normal_dirent->d_reclen;
@@ -153,8 +153,8 @@ void NormalDirectory::RebuildDirents() {
         // next element may break 512 byte alignment
         if (tmp.d_reclen + dirent_offset > next_ceiling) {
             // align previous dirent's size to the current ceiling
-            *reinterpret_cast<u16*>(static_cast<u8*>(dirent_cache_bin.data()) +
-                                    last_reclen_offset) += next_ceiling - dirent_offset;
+            *reinterpret_cast<u16*>(dirent_cache_bin.data() + last_reclen_offset) +=
+                next_ceiling - dirent_offset;
             // set writing pointer to the aligned start position (current ceiling)
             dirent_offset = next_ceiling;
             // move the ceiling up and zero-out the buffer
@@ -172,7 +172,7 @@ void NormalDirectory::RebuildDirents() {
     }
 
     // last reclen, as before
-    *reinterpret_cast<u16*>(static_cast<u8*>(dirent_cache_bin.data()) + last_reclen_offset) +=
+    *reinterpret_cast<u16*>(dirent_cache_bin.data() + last_reclen_offset) +=
         next_ceiling - dirent_offset;
 
     // i have no idea if this is the case, but lseek returns size aligned to 512

@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <string_view>
+
 #include "common/types.h"
 #include "core/file_sys/directories/base_directory.h"
 
@@ -12,7 +13,19 @@ namespace Core::Directories {
 
 class PfsDirectory final : public BaseDirectory {
 public:
+#pragma pack(push, 1)
+    typedef struct {
+        u32 d_fileno;
+        u32 d_type;
+        u32 d_namlen;
+        u32 d_reclen;
+        char d_name[256];
+    } PfsDirectoryDirent;
+#pragma pack(pop)
+
     static std::shared_ptr<PfsDirectory> Create(std::string_view guest_path);
+    static s64 validate_dirent(const PfsDirectoryDirent* dirent);
+
     explicit PfsDirectory(std::string_view guest_path);
     ~PfsDirectory() override = default;
 
@@ -23,27 +36,6 @@ public:
 
 private:
     u64 suggested_file_offset{};
-    s64 nearest_dirent(const void* buffer, u64 target_offset, u64 buffer_length);
-    s64 validate_dirent(const void* buffer, u64 buffer_length);
-
-#pragma pack(push, 1)
-    struct PfsDirectoryDirent {
-        u32 d_fileno;
-        u32 d_type;
-        u32 d_namlen;
-        u32 d_reclen;
-        char d_name[256];
-    };
-#pragma pack(pop)
-
-#pragma pack(push, 1)
-    struct NormalDirectoryDirent {
-        u32 d_fileno;
-        u16 d_reclen;
-        u8 d_type;
-        u8 d_namlen;
-        char d_name[256];
-    };
-#pragma pack(pop)
+    s64 nearest_dirent(const char* buffer, s64 size, s64 offset);
 };
 } // namespace Core::Directories

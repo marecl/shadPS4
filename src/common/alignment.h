@@ -25,13 +25,11 @@ template <typename T>
 // faster for sizes aligned to powers of 2
 template <typename T>
 [[nodiscard]] constexpr T AlignUpAligned(T value, std::size_t size) {
-    static_assert(std::is_unsigned_v<T>, "T must be an unsigned value.");
     return static_cast<T>(value & (~(size - 1))) + size;
 }
 
 template <typename T>
 [[nodiscard]] constexpr T AlignDownAligned(T value, std::size_t size) {
-    static_assert(std::is_unsigned_v<T>, "T must be an unsigned value.");
     return static_cast<T>(value & (~(size - 1)));
 }
 

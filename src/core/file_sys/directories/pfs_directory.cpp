@@ -7,6 +7,7 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
+#include "core/file_sys/directories/normal_directory.h"
 #include "core/file_sys/directories/pfs_directory.h"
 #include "core/file_sys/fs.h"
 
@@ -82,8 +83,8 @@ s64 PfsDirectory::lseek(s64 offset, s32 whence) {
     // we're spending a bit more time here, but lseek() isn't called that often
     // would be a waste if done every time getdents is called
     this->suggested_file_offset =
-        this->file_offset + backtrack_dirent(this->dirent_cache_bin.data(), this->file_offset,
-                                             this->dirent_cache_bin.size());
+        this->file_offset + nearest_dirent(this->dirent_cache_bin.data(),
+                                           this->dirent_cache_bin.size(), this->file_offset);
     return this->file_offset;
 }
 
@@ -149,7 +150,7 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
 
         // reclen for both is the same despite difference in var sizes, extra 0s are padded after
         // the name
-        NormalDirectoryDirent normal_dirent{};
+        NormalDirectory::NormalDirectoryDirent normal_dirent{};
         normal_dirent.d_fileno = pfs_dirent->d_fileno;
         normal_dirent.d_reclen = pfs_dirent->d_reclen;
         normal_dirent.d_type = (pfs_dirent->d_type == 2) ? 8 : 4;
@@ -170,9 +171,10 @@ pfs_getdents_end:
 }
 
 // -1 on not found
-bool PfsDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
+// this only used by getdirentries
+s64 PfsDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
     // max size is 272, last 23 bytes are never starting a dirent
-    s64 offset_adj = ISAL(offset, 8) ? offset : ALUP(offset, 8);
+    s64 offset_adj = Common::IsAligned(offset, 8) ? offset : Common::AlignUpAligned(offset, 8);
     s64 max_advance = std::min(size - offset_adj, s64(272));
     if (max_advance < 24)
         return -2;
@@ -180,11 +182,10 @@ bool PfsDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
     s64 status{};
 
     for (s64 out_offset = offset_adj; out_offset <= offset_adj + max_advance; out_offset += 8) {
-        const OrbisInternals::FolderDirent* tested_dirent =
-            reinterpret_cast<const OrbisInternals::FolderDirent*>(buffer + out_offset);
-        status = validate_pfs_getdirentries_dirent(tested_dirent);
-        LogWarning(GetSt(Style::BOLD), "Testing", out_offset - offset, GetSt(Style::RESET), "=",
-                   GetSt(Style::FG_MAGENTA), status);
+        const NormalDirectory::NormalDirectoryDirent* tested_dirent =
+            reinterpret_cast<const NormalDirectory::NormalDirectoryDirent*>(buffer + out_offset);
+        status = NormalDirectory::validate_dirent(tested_dirent);
+        LOG_ERROR(Kernel_Fs, "Testing {} = {}", out_offset - offset, status);
 
         if (status < 0)
             continue;
@@ -197,11 +198,14 @@ bool PfsDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
     return status;
 }
 
-s64 PfsDirectory::validate_dirent(PfsDirectoryDirent* dirent) {
-    if (dirent->d_fileno == 0)
+s64 PfsDirectory::validate_dirent(const PfsDirectoryDirent* dirent) {
+    auto _reclen = 16 + dirent->d_namlen + 1;
+    _reclen = Common::IsAligned(_reclen, 8) ? _reclen : Common::AlignUpAligned(_reclen, 8);
+    if (_reclen != dirent->d_reclen)
         return -10;
-    if (Common::IsAligned(16 + dirent->d_namlen + 1, 8) != dirent->d_reclen)
+    if (dirent->d_fileno == 0)
         return -11;
+
     // these don't fail so often
     if (dirent->d_namlen == 0)
         return -12;
@@ -217,29 +221,8 @@ s64 PfsDirectory::validate_dirent(PfsDirectoryDirent* dirent) {
         return -17;
     if (strnlen(dirent->d_name, 255) != dirent->d_namlen)
         return -18;
+
     return 1;
-}
-}
-
-// return relative position of a backtracked dirent
-// always negative lmao
-// 5-6it for short names, 34 at most for maxed out dirent
-// but at one point certainly faster for huge directories
-s64 PfsDirectory::backtrack_dirent(const void* buffer, u64 target_offset, u64 buffer_length) {
-    // can't go further back, just start over
-    if (target_offset < 272)
-        return -target_offset;
-
-    u64 offset{}; // max dirent size, no point in looking further back
-
-    for (offset = target_offset; offset >= (target_offset - 272); offset -= 8) {
-        if (!detect_dirent(reinterpret_cast<const u8*>(buffer) + offset,
-                           std::min(buffer_length, (u64)255)))
-            continue;
-        break;
-    }
-
-    return offset - target_offset;
 }
 
 } // namespace Core::Directories

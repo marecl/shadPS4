@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/alignment.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/file_sys/directories/base_directory.h"
@@ -59,6 +60,36 @@ s64 BaseDirectory::lseek(s64 offset, s32 whence) {
 
     file_offset = file_offset_new;
     return file_offset;
+}
+
+s64 BaseDirectory::validate_dirent(const BaseDirectoryDirent* dirent) {
+    // N/A it'd need offset to calculate reclen correctly
+    // i think this test is duplicated somewhere here too
+    // auto _reclen = 8 + dirent->d_namlen + 1;
+    // _reclen      = ISAL(_reclen, 8) ? _reclen : ALUP(_reclen, 8);
+    // if (_reclen != dirent->d_reclen) return -10;
+
+    // best case scenario tbh
+    if (Common::IsAligned(dirent->d_reclen, 4))
+        return -10;
+    if (dirent->d_fileno == 0)
+        return -11;
+
+    // these don't fail so often
+    if (dirent->d_namlen == 0)
+        return -12;
+    if (dirent->d_type == 0)
+        return -13;
+    if (dirent->d_reclen == 0)
+        return -14;
+    if (dirent->d_reclen < 12 || dirent->d_reclen > 496)
+        return -16;
+    if (dirent->d_type > 15)
+        return -17;
+    if (strnlen(dirent->d_name, 255) != dirent->d_namlen)
+        return -18;
+
+    return 1;
 }
 
 } // namespace Core::Directories

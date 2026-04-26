@@ -20,6 +20,16 @@ namespace Core::Directories {
 
 class BaseDirectory {
 protected:
+#pragma pack(push, 1)
+    typedef struct {
+        u32 d_fileno;
+        u16 d_reclen;
+        u8 d_type;
+        u8 d_namlen;
+        char d_name[256];
+    } BaseDirectoryDirent;
+#pragma pack(pop)
+
     static u32 next_fileno() {
         static u32 pool = 10;
         return ++pool;
@@ -27,10 +37,12 @@ protected:
 
     u64 file_offset{0};
     u64 directory_size{0};
-    std::vector<u8> dirent_cache_bin{};
+    std::vector<char> dirent_cache_bin{};
     std::unordered_map<std::string, u32> dirent_fileno_cache{};
 
 public:
+    static s64 validate_dirent(const BaseDirectoryDirent* dirent);
+
     explicit BaseDirectory();
     virtual ~BaseDirectory();
 

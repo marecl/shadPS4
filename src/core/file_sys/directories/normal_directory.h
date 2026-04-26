@@ -12,7 +12,13 @@ namespace Core::Directories {
 
 class NormalDirectory final : public BaseDirectory {
 public:
+    using NormalDirectoryDirent = BaseDirectoryDirent;
+
     static std::shared_ptr<NormalDirectory> Create(std::string_view guest_path);
+    static s64 validate_dirent(const NormalDirectoryDirent* dirent) {
+        return BaseDirectory::validate_dirent(dirent);
+    }
+
     explicit NormalDirectory(std::string_view guest_path);
     ~NormalDirectory() override = default;
 
@@ -21,16 +27,6 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
-#pragma pack(push, 1)
-    struct NormalDirectoryDirent {
-        u32 d_fileno;
-        u16 d_reclen;
-        u8 d_type;
-        u8 d_namlen;
-        char d_name[256];
-    };
-#pragma pack(pop)
-
     const std::string guest_directory{};
     std::filesystem::file_time_type previous_write_time{};
 
