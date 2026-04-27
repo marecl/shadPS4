@@ -24,13 +24,20 @@ std::shared_ptr<NormalDirectory> NormalDirectory::Create(std::string_view guest_
 
 NormalDirectory::NormalDirectory(std::string_view guest_directory)
     : guest_directory(std::move(std::string(guest_directory))) {
+    this->dirent_fileno_cache.emplace(".", BaseDirectory::next_fileno());  // can be random
+    this->dirent_fileno_cache.emplace("..", BaseDirectory::next_fileno()); // should not be random
+
     RebuildDirents();
 }
 
 s64 NormalDirectory::pread(void* buf, u64 nbytes, s64 offset) {
     RebuildDirents();
 
-    if (this->file_offset >= this->directory_size)
+    if (nbytes == 0)
+        return 0;
+    if (offset < 0)
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    if (offset >= this->directory_size)
         return 0;
 
     // data is contiguous. read goes like any regular file would: start at offset, read n bytes
@@ -41,6 +48,8 @@ s64 NormalDirectory::pread(void* buf, u64 nbytes, s64 offset) {
 
     s64 bytes_available =
         std::min<s64>(this->dirent_cache_bin.size() - offset, static_cast<s64>(nbytes));
+    if (bytes_available < 0)
+        return ORBIS_KERNEL_ERROR_EINVAL;
 
     // data
     memcpy(buf, this->dirent_cache_bin.data() + offset, bytes_available);

@@ -25,29 +25,36 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
     directory_size = 0;
     dirent_cache_bin.reserve(512);
 
-    std::vector<std::pair<std::filesystem::path, bool>> file_list{};
+    typedef struct _scandir_entry_t {
+        u32 fileno;
+        bool is_file;
+    } scandir_entry_t;
+
+    std::vector<std::pair<std::string, scandir_entry_t>> file_list{};
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
     mnt->IterateDirectory(guest_directory, [&file_list, this](const std::filesystem::path& ent_path,
                                                               const bool ent_is_file) {
-        file_list.emplace_back(ent_path, ent_is_file);
-        this->dirent_fileno_cache.emplace(ent_path.filename().string(),
-                                          BaseDirectory::next_fileno());
+        file_list.emplace_back(
+            ent_path.filename().string(),
+            scandir_entry_t{.fileno = BaseDirectory::next_fileno(), .is_file = ent_is_file});
     });
 
-    std::ranges::sort(file_list.begin(), file_list.end());
-    file_list.emplace(file_list.begin(), "..", false);
-    file_list.emplace(file_list.begin(), ".", false);
+    std::ranges::sort(file_list, std::ranges::less{},
+                      &std::pair<std::string, scandir_entry_t>::first);
+    file_list.emplace(file_list.begin(), ".",
+                      scandir_entry_t{.fileno = BaseDirectory::next_fileno(), .is_file = false});
+    file_list.emplace(file_list.begin(), "..",
+                      scandir_entry_t{.fileno = BaseDirectory::next_fileno(), .is_file = false});
 
-    for (const auto& [file_path, is_file] : file_list) {
+    for (const auto& [leaf, entry_meta] : file_list) {
         PfsDirectoryDirent tmp{};
-        std::string leaf(file_path.filename().string());
         auto elem = dirent_fileno_cache.find(leaf);
 
-        tmp.d_fileno = elem->second;
+        tmp.d_fileno = entry_meta.fileno;
         tmp.d_namlen = leaf.size();
         strncpy(tmp.d_name, leaf.data(), tmp.d_namlen + 1);
-        tmp.d_type = is_file ? 2 : 4;
+        tmp.d_type = entry_meta.is_file ? 2 : 4;
         tmp.d_reclen = Common::AlignUp(dirent_meta_size + tmp.d_namlen + 1, 8);
         auto dirent_ptr = reinterpret_cast<const u8*>(&tmp);
 
@@ -59,6 +66,13 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
 }
 
 s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
+    if (nbytes == 0)
+        return 0;
+    if (offset < 0)
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    if (offset >= this->directory_size)
+        return 0;
+
     s64 total_available = this->directory_size - offset;
     if (total_available <= 0)
         return 0;
@@ -78,7 +92,9 @@ s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
 }
 
 s64 PfsDirectory::lseek(s64 offset, s32 whence) {
-    BaseDirectory::lseek(offset, whence);
+    if (auto test = BaseDirectory::lseek(offset, whence); test < 0)
+        return test;
+
     // refresh here, so correct offset is cached
     // we're spending a bit more time here, but lseek() isn't called that often
     // would be a waste if done every time getdents is called
@@ -185,7 +201,7 @@ s64 PfsDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
         const NormalDirectory::NormalDirectoryDirent* tested_dirent =
             reinterpret_cast<const NormalDirectory::NormalDirectoryDirent*>(buffer + out_offset);
         status = NormalDirectory::validate_dirent(tested_dirent);
-        LOG_ERROR(Kernel_Fs, "Testing {} = {}", out_offset - offset, status);
+        // LOG_ERROR(Kernel_Fs, "Testing {} = {}", out_offset - offset, status);
 
         if (status < 0)
             continue;

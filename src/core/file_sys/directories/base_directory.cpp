@@ -11,8 +11,7 @@
 namespace Core::Directories {
 
 BaseDirectory::BaseDirectory() {
-    this->dirent_fileno_cache.emplace(".", BaseDirectory::next_fileno());  // can be random
-    this->dirent_fileno_cache.emplace("..", BaseDirectory::next_fileno()); // should not be random
+    // remember to handle adding [.] and [..] in derived classes
     this->file_offset = 0;
 };
 
@@ -52,9 +51,14 @@ s64 BaseDirectory::preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 io
 }
 
 s64 BaseDirectory::lseek(s64 offset, s32 whence) {
+    if (whence < 0 || whence > 4)
+        return ORBIS_KERNEL_ERROR_EINVAL;
 
-    s64 file_offset_new = ((0 == whence) * offset) + ((1 == whence) * (file_offset + offset)) +
-                          ((2 == whence) * (directory_size + offset));
+    s64 file_offset_new =
+        ((0 == whence) * (offset)) + ((1 == whence) * (file_offset + offset)) +
+        ((2 == whence) * (directory_size + offset)) +
+        ((3 == whence) * (offset < this->directory_size ? offset : ORBIS_KERNEL_ERROR_ENXIO)) +
+        ((4 == whence) * (this->directory_size));
     if (file_offset_new < 0)
         return ORBIS_KERNEL_ERROR_EINVAL;
 
