@@ -151,7 +151,7 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
             reinterpret_cast<PfsDirectoryDirent*>(this->dirent_cache_bin.data() + buffer_position);
 
         // bad, incomplete or OOB entry
-        if (pfs_dirent->d_namlen == 0)
+        if (validate_dirent(pfs_dirent) <= 0)
             break;
 
         if ((bytes_written + pfs_dirent->d_reclen) > nbytes)

@@ -362,8 +362,8 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
         return_info->name = "Unknown !!!";
     }
     if (library->name != "libc" && library->name != "libSceFios2") {
-        LOG_WARNING(Core_Linker, "Linker: Stub resolved {} as {} (lib: {}, mod: {})", sr.name,
-                    return_info->name, library->name, module->name);
+        // LOG_WARNING(Core_Linker, "Linker: Stub resolved {} as {} (lib: {}, mod: {})", sr.name,
+        // return_info->name, library->name, module->name);
     }
     return false;
 }

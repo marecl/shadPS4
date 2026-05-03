@@ -37,5 +37,6 @@ public:
 private:
     u64 suggested_file_offset{};
     s64 nearest_dirent(const char* buffer, s64 size, s64 offset);
+
 };
 } // namespace Core::Directories
