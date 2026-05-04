@@ -18,10 +18,6 @@ std::shared_ptr<PfsDirectory> PfsDirectory::Create(std::string_view guest_direct
 }
 
 PfsDirectory::PfsDirectory(std::string_view guest_directory) {
-    constexpr u32 dirent_meta_size =
-        sizeof(PfsDirectoryDirent::d_fileno) + sizeof(PfsDirectoryDirent::d_type) +
-        sizeof(PfsDirectoryDirent::d_namlen) + sizeof(PfsDirectoryDirent::d_reclen);
-
     directory_size = 0;
     dirent_cache_bin.reserve(512);
 
@@ -215,7 +211,7 @@ s64 PfsDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
 }
 
 s64 PfsDirectory::validate_dirent(const PfsDirectoryDirent* dirent) {
-    auto _reclen = 16 + dirent->d_namlen + 1;
+    auto _reclen = dirent_meta_size + dirent->d_namlen + 1;
     _reclen = Common::IsAligned(_reclen, 8) ? _reclen : Common::AlignUpAligned(_reclen, 8);
     if (_reclen != dirent->d_reclen)
         return -10;

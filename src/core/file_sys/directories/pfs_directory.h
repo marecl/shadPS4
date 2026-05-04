@@ -35,8 +35,10 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
+    static const u32 dirent_meta_size =
+        sizeof(PfsDirectoryDirent::d_fileno) + sizeof(PfsDirectoryDirent::d_type) +
+        sizeof(PfsDirectoryDirent::d_namlen) + sizeof(PfsDirectoryDirent::d_reclen);
     u64 suggested_file_offset{};
     s64 nearest_dirent(const char* buffer, s64 size, s64 offset);
-
 };
 } // namespace Core::Directories

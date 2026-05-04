@@ -27,6 +27,10 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
+    static const u32 dirent_meta_size =
+        sizeof(NormalDirectoryDirent::d_fileno) + sizeof(NormalDirectoryDirent::d_type) +
+        sizeof(NormalDirectoryDirent::d_namlen) + sizeof(NormalDirectoryDirent::d_reclen);
+
     const std::string guest_directory{};
     std::filesystem::file_time_type previous_write_time{};
 

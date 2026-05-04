@@ -53,16 +53,22 @@ s64 BaseDirectory::preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 io
 s64 BaseDirectory::lseek(s64 offset, s32 whence) {
     if (whence < 0 || whence > 4)
         return ORBIS_KERNEL_ERROR_EINVAL;
+    if (whence == 3 || whence == 4)
+        return ORBIS_KERNEL_ERROR_ENOTTY;
 
-    s64 file_offset_new =
-        ((0 == whence) * (offset)) + ((1 == whence) * (file_offset + offset)) +
-        ((2 == whence) * (directory_size + offset)) +
-        ((3 == whence) * (offset < this->directory_size ? offset : ORBIS_KERNEL_ERROR_ENXIO)) +
-        ((4 == whence) * (this->directory_size));
-    if (file_offset_new < 0)
+    s64 offset_new{};
+    s64 offset_origin = ((0 == whence) * 0) +             // beginning
+                        ((1 == whence) * file_offset) +   // curpos
+                        ((2 == whence) * directory_size); // end
+
+    if (__builtin_add_overflow(offset_origin, offset, &offset_new)) {
+        return ORBIS_KERNEL_ERROR_EOVERFLOW;
+    }
+    if (offset_new < 0) {
         return ORBIS_KERNEL_ERROR_EINVAL;
+    }
 
-    file_offset = file_offset_new;
+    file_offset = offset_new;
     return file_offset;
 }
 

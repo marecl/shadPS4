@@ -123,10 +123,6 @@ void NormalDirectory::RebuildDirents() {
         return;
     previous_write_time = write_time;
 
-    constexpr u32 dirent_meta_size =
-        sizeof(NormalDirectoryDirent::d_fileno) + sizeof(NormalDirectoryDirent::d_type) +
-        sizeof(NormalDirectoryDirent::d_namlen) + sizeof(NormalDirectoryDirent::d_reclen);
-
     u64 next_ceiling = 0;
     u64 dirent_offset = 0;
     u64 last_reclen_offset = 4;
