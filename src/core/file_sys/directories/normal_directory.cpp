@@ -170,7 +170,7 @@ void NormalDirectory::RebuildDirents() {
                 LOG_ERROR(Kernel_Fs,
                           "AAfor some reason reclen is larger than sector remainder :< {} {}",
                           tmp.d_reclen, sector_remaining);
-
+            // any other way of updating last reclen??? this seems to be not working :<
             *last_reclen_data_ptr += sector_remaining;
 
             sector_remaining = 512;
