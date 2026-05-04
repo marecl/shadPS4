@@ -123,12 +123,6 @@ void NormalDirectory::RebuildDirents() {
         return;
     previous_write_time = write_time;
 
-    u64 next_ceiling = 0;
-    u64 dirent_offset = 0;
-    u64 last_reclen_offset = 4;
-    dirent_cache_bin.clear();
-    dirent_cache_bin.reserve(512);
-
     std::vector<std::pair<std::filesystem::path, bool>> file_list{{".", false}, {"..", false}};
 
     mnt->IterateDirectory(guest_directory, [&file_list, this](const std::filesystem::path& ent_path,
@@ -138,8 +132,19 @@ void NormalDirectory::RebuildDirents() {
                                           BaseDirectory::next_fileno());
     });
 
-    u64 fcnt = 0;
+    u64 fcnt = 0; // entry counter, can be removed
+    u64 dirent_offset = 0;
+    u64 last_reclen_offset = 4;
+    u16* last_reclen_data_ptr{};
+    dirent_cache_bin.clear();
+    dirent_cache_bin.reserve(512);
+    dirent_cache_bin.resize(0);
+
+    char sector[512]{0};
+    s16 sector_remaining = 512;
     for (const auto& [file_path, is_file] : file_list) {
+        if (sector_remaining < 0)
+            break;
         NormalDirectoryDirent tmp{};
         std::string leaf(file_path.filename().string());
 
@@ -150,36 +155,50 @@ void NormalDirectory::RebuildDirents() {
 
         // prepare dirent
         tmp.d_fileno = elem->second;
-        tmp.d_namlen = leaf.size();
+        tmp.d_namlen = elem->first.size();
         strncpy(tmp.d_name, leaf.data(), tmp.d_namlen + 1);
         tmp.d_type = (is_file ? 0100000 : 0040000) >> 12;
         tmp.d_reclen = Common::AlignUp(dirent_meta_size + tmp.d_namlen + 1, 4);
 
         // next element may break 512 byte alignment
-        if (tmp.d_reclen + dirent_offset > next_ceiling) {
+        if (sector_remaining - tmp.d_reclen < 0) {
             // align previous dirent's size to the current ceiling
-            *reinterpret_cast<u16*>(dirent_cache_bin.data() + last_reclen_offset) +=
-                next_ceiling - dirent_offset;
+            last_reclen_data_ptr =
+                reinterpret_cast<u16*>(dirent_cache_bin.data() + last_reclen_offset);
             // set writing pointer to the aligned start position (current ceiling)
-            dirent_offset = next_ceiling;
-            // move the ceiling up and zero-out the buffer
-            next_ceiling += 512;
-            dirent_cache_bin.resize(next_ceiling);
-            std::fill(dirent_cache_bin.begin() + dirent_offset,
-                      dirent_cache_bin.begin() + next_ceiling, 0);
+            if (*last_reclen_data_ptr > sector_remaining)
+                LOG_ERROR(Kernel_Fs,
+                          "AAfor some reason reclen is larger than sector remainder :< {} {}",
+                          tmp.d_reclen, sector_remaining);
+
+            *last_reclen_data_ptr += sector_remaining;
+
+            sector_remaining = 512;
+            // dirent_cache_bin.resize(dirent_cache_bin.size() + 512);
+            dirent_cache_bin.insert(dirent_cache_bin.end(), sector, sector + 512);
+            memset(sector, 0, 512);
+            dirent_offset = Common::IsAligned(dirent_offset, 512)
+                                ? dirent_offset
+                                : Common::AlignUp(dirent_offset, 512);
         }
 
         // current dirent's reclen position
         last_reclen_offset = dirent_offset + 4;
-        memcpy(dirent_cache_bin.data() + dirent_offset, &tmp, tmp.d_reclen);
+        memcpy(sector + 512 - sector_remaining, &tmp, tmp.d_reclen);
         dirent_offset += tmp.d_reclen;
+        sector_remaining -= tmp.d_reclen;
         fcnt++;
     }
 
-    // last reclen, as before
-    *reinterpret_cast<u16*>(dirent_cache_bin.data() + last_reclen_offset) +=
-        next_ceiling - dirent_offset;
+    if (!Common::IsAligned(dirent_offset, 512)) {
+        last_reclen_data_ptr = reinterpret_cast<u16*>(dirent_cache_bin.data() + last_reclen_offset);
+        // set writing pointer to the aligned start position (current ceiling)
+        if (*last_reclen_data_ptr > sector_remaining)
+            LOG_ERROR(Kernel_Fs, "for some reason reclen is larger than sector remainder :< {} {}",
+                      *last_reclen_data_ptr, sector_remaining);
 
+        *last_reclen_data_ptr += sector_remaining;
+    }
     // i have no idea if this is the case, but lseek returns size aligned to 512
     directory_size = dirent_cache_bin.size();
 
