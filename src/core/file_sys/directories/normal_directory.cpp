@@ -133,7 +133,6 @@ void NormalDirectory::RebuildDirents() {
     });
 
     u64 fcnt = 0; // entry counter, can be removed
-    u64 dirent_offset = 0;
     u64 last_reclen_offset = 4;
     u16* last_reclen_data_ptr{};
     dirent_cache_bin.clear();
@@ -161,58 +160,35 @@ void NormalDirectory::RebuildDirents() {
         tmp.d_reclen = Common::AlignUp(dirent_meta_size + tmp.d_namlen + 1, 4);
 
         // next element may break 512 byte alignment
-        if (sector_remaining - tmp.d_reclen < 0) {
+        if (sector_remaining - tmp.d_reclen < 0) { // 12 bytes is the minimal size
             // align previous dirent's size to the current ceiling
-            last_reclen_data_ptr =
-                reinterpret_cast<u16*>(dirent_cache_bin.data() + last_reclen_offset);
-            // set writing pointer to the aligned start position (current ceiling)
-            if (*last_reclen_data_ptr > sector_remaining)
-                LOG_ERROR(Kernel_Fs,
-                          "AAfor some reason reclen is larger than sector remainder :< {} {}",
-                          tmp.d_reclen, sector_remaining);
+            last_reclen_data_ptr = reinterpret_cast<u16*>(sector + last_reclen_offset);
             // any other way of updating last reclen??? this seems to be not working :<
             *last_reclen_data_ptr += sector_remaining;
 
             sector_remaining = 512;
-            // dirent_cache_bin.resize(dirent_cache_bin.size() + 512);
             dirent_cache_bin.insert(dirent_cache_bin.end(), sector, sector + 512);
             memset(sector, 0, 512);
-            dirent_offset = Common::IsAligned(dirent_offset, 512)
-                                ? dirent_offset
-                                : Common::AlignUp(dirent_offset, 512);
         }
 
         // current dirent's reclen position
-        last_reclen_offset = dirent_offset + 4;
         memcpy(sector + 512 - sector_remaining, &tmp, tmp.d_reclen);
-        dirent_offset += tmp.d_reclen;
+        last_reclen_offset = 512 - sector_remaining + 4;
         sector_remaining -= tmp.d_reclen;
         fcnt++;
     }
 
-    if (!Common::IsAligned(dirent_offset, 512)) {
-        last_reclen_data_ptr = reinterpret_cast<u16*>(dirent_cache_bin.data() + last_reclen_offset);
-        // set writing pointer to the aligned start position (current ceiling)
-        if (*last_reclen_data_ptr > sector_remaining)
-            LOG_ERROR(Kernel_Fs, "for some reason reclen is larger than sector remainder :< {} {}",
-                      *last_reclen_data_ptr, sector_remaining);
-
+    if (sector_remaining > 0 &&
+        sector_remaining < 512) { // 0 is covered by if statement, 512 sector has been just written
+        last_reclen_data_ptr = reinterpret_cast<u16*>(sector + last_reclen_offset);
         *last_reclen_data_ptr += sector_remaining;
+        dirent_cache_bin.insert(dirent_cache_bin.end(), sector, sector + 512);
     }
     // i have no idea if this is the case, but lseek returns size aligned to 512
     directory_size = dirent_cache_bin.size();
 
-    // sanity check. can't do memory view in a vector :<
-    if (directory_size >= 65536)
-        return;
-    char _buffer[65536]{'A'};
-
     LOG_ERROR(Kernel_Fs, "Refreshed directory: {} , {} entries indexed , size {}",
               this->guest_directory, fcnt, this->directory_size);
-    memcpy(_buffer, this->dirent_cache_bin.data(), this->directory_size);
-
-    BP();
-    return;
 }
 
 } // namespace Core::Directories
