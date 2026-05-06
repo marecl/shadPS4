@@ -68,48 +68,98 @@ s32 NormalDirectory::fstat(Libraries::Kernel::OrbisKernelStat* stat) {
 s64 NormalDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     RebuildDirents();
 
-    if (basep)
+    s64 apparent_end = this->file_offset + nbytes;
+    s64 apparent_end_down = Common::AlignDownAligned(apparent_end, 512);
+    s64 file_offset_down = Common::AlignDownAligned(file_offset, 512);
+
+    // within the same sector, no 512b alignment inbetween
+    if (apparent_end_down <= file_offset_down) {
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    }
+
+    if (nullptr != basep)
         *basep = file_offset;
-
-    // same as others, we just don't need a variable
-    if (file_offset >= directory_size)
+    if (file_offset >= directory_size) {
         return 0;
+    }
 
-    s64 bytes_written = 0;
-    s64 working_offset = file_offset;
-    s64 dirent_buffer_offset = 0;
-    s64 aligned_count = Common::AlignDown(nbytes, 512);
+    // we can now assume that offset is always smaller than size
+    s64 allowed_count = std::min(u64(apparent_end_down - file_offset), nbytes);
+    allowed_count = std::min(u64(allowed_count), directory_size - file_offset);
+    allowed_count = Common::AlignDownAligned(allowed_count, 4);
+
+    u64 bytes_written = 0;
+    u64 read_offset = file_offset;
+    u64 write_offset = 0;
 
     const char* dirent_buffer = this->dirent_cache_bin.data();
-    while (dirent_buffer_offset < this->dirent_cache_bin.size()) {
-        const char* normal_dirent_ptr = dirent_buffer + dirent_buffer_offset;
-        const NormalDirectoryDirent* normal_dirent =
-            reinterpret_cast<const NormalDirectoryDirent*>(normal_dirent_ptr);
-        auto d_reclen = normal_dirent->d_reclen;
 
-        // bad, incomplete or OOB entry
-        if (normal_dirent->d_namlen == 0)
+    auto dirent_offset = nearest_dirent(dirent_buffer, allowed_count, read_offset);
+    if (0 > dirent_offset) {
+        LOG_ERROR(Kernel_Fs, "Error during seeking dirent {}", dirent_offset);
+        return 0;
+    }
+    {
+        auto to_copy = std::min(dirent_offset, allowed_count);
+        memcpy(buf, dirent_buffer + file_offset, to_copy);
+        read_offset += to_copy;
+        bytes_written += to_copy;
+    }
+
+    while (bytes_written < allowed_count) {
+        const auto* dirent =
+            reinterpret_cast<const NormalDirectoryDirent*>(dirent_buffer + read_offset);
+
+        if (!validate_dirent(dirent)) {
             break;
-
-        if (working_offset >= d_reclen) {
-            dirent_buffer_offset += d_reclen;
-            working_offset -= d_reclen;
-            continue;
         }
 
-        if ((bytes_written + d_reclen) > aligned_count)
+        if ((bytes_written + dirent->d_reclen) > allowed_count)
             // dirents are aligned to the last full one
             break;
 
-        memcpy(static_cast<u8*>(buf) + bytes_written, normal_dirent_ptr + working_offset,
-               d_reclen - working_offset);
-        bytes_written += d_reclen - working_offset;
-        dirent_buffer_offset += d_reclen;
-        working_offset = 0;
+        memcpy(static_cast<char*>(buf) + bytes_written, dirent_buffer + read_offset,
+               dirent->d_reclen);
+        bytes_written += dirent->d_reclen;
+        read_offset += dirent->d_reclen;
     }
 
     file_offset += bytes_written;
     return bytes_written;
+}
+
+// -1 on not found
+// this only used by getdirentries
+s64 NormalDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
+    // max size is 272, last 23 bytes are never starting a dirent
+    s64 offset_adj = Common::IsAligned(offset, 4) ? offset : Common::AlignUpAligned(offset, 4);
+    s64 max_advance = std::min(size - offset_adj, s64(256 + dirent_meta_size));
+    if (max_advance < 12)
+        return -2;
+
+    s64 status{};
+
+    for (s64 out_offset = offset_adj; out_offset <= offset_adj + max_advance; out_offset += 4) {
+        const auto* tested_dirent =
+            reinterpret_cast<const NormalDirectoryDirent*>(buffer + out_offset);
+
+        if (validate_dirent(tested_dirent) < 0)
+            continue;
+
+        out_offset
+    }
+
+    for (s64 out_offset = offset_adj; out_offset <= offset_adj + max_advance; out_offset += 4) {
+        const auto* tested_dirent =
+            reinterpret_cast<const NormalDirectoryDirent*>(buffer + out_offset);
+
+        if (validate_dirent(tested_dirent) < 0)
+            continue;
+
+        return out_offset - offset;
+    }
+
+    return status;
 }
 
 void NormalDirectory::RebuildDirents() {

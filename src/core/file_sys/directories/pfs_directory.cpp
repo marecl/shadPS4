@@ -187,7 +187,7 @@ pfs_getdents_end:
 s64 PfsDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
     // max size is 272, last 23 bytes are never starting a dirent
     s64 offset_adj = Common::IsAligned(offset, 8) ? offset : Common::AlignUpAligned(offset, 8);
-    s64 max_advance = std::min(size - offset_adj, s64(272));
+    s64 max_advance = std::min(size - offset_adj, s64(256 + dirent_meta_size));
     if (max_advance < 24)
         return -2;
 
@@ -197,12 +197,10 @@ s64 PfsDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
         const NormalDirectory::NormalDirectoryDirent* tested_dirent =
             reinterpret_cast<const NormalDirectory::NormalDirectoryDirent*>(buffer + out_offset);
         status = NormalDirectory::validate_dirent(tested_dirent);
-        // LOG_ERROR(Kernel_Fs, "Testing {} = {}", out_offset - offset, status);
 
         if (status < 0)
             continue;
 
-        // LogError("Found a match forward at", out_offset);
         return out_offset - offset;
     }
 

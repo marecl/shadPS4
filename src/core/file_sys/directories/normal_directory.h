@@ -34,6 +34,7 @@ private:
     const std::string guest_directory{};
     std::filesystem::file_time_type previous_write_time{};
 
+    s64 nearest_dirent(const char* buffer, s64 size, s64 offset);
     void RebuildDirents();
 };
 } // namespace Core::Directories
