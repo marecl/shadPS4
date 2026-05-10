@@ -18,7 +18,9 @@ std::shared_ptr<PfsDirectory> PfsDirectory::Create(std::string_view guest_direct
 }
 
 PfsDirectory::PfsDirectory(std::string_view guest_directory) {
+    const std::filesystem::path guest_directory_path = guest_directory;
     directory_size = 0;
+    suggested_file_offset = 0;
     dirent_cache_bin.reserve(512);
 
     std::vector<std::pair<std::filesystem::path, u8>> file_list{};
@@ -30,9 +32,9 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
                           });
 
     std::ranges::sort(file_list, std::ranges::less{}, &std::pair<std::filesystem::path, u8>::first);
-    file_list.emplace(file_list.begin(), ".",
-                      std2pfsFileType(std::filesystem::file_type::directory));
     file_list.emplace(file_list.begin(), "..",
+                      std2pfsFileType(std::filesystem::file_type::directory));
+    file_list.emplace(file_list.begin(), ".",
                       std2pfsFileType(std::filesystem::file_type::directory));
 
     for (const auto& [file_path, file_type] : file_list) {

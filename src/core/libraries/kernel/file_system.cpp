@@ -1053,11 +1053,6 @@ static s64 GetDents(s32 fd, char* buf, u64 nbytes, s64* basep) {
         return -1;
     }
 
-    if (nbytes < 512) {
-        *__Error() = POSIX_EINVAL;
-        return -1;
-    }
-
     switch (file->type) {
     case Core::FileSys::FileType::Directory: {
         s64 result = file->directory->getdents(buf, nbytes, basep);

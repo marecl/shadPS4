@@ -23,18 +23,21 @@ public:
     ~NormalDirectory() override = default;
 
     virtual s64 pread(void* buf, u64 nbytes, s64 offset) override;
+    virtual s64 lseek(s64 offset, s32 whence) override;
     virtual s32 fstat(Libraries::Kernel::OrbisKernelStat* stat) override;
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
+    s64 nearest_dirent(const char* buffer, s64 offset);
+    void RebuildDirents();
+
     static const u32 dirent_meta_size =
         sizeof(NormalDirectoryDirent::d_fileno) + sizeof(NormalDirectoryDirent::d_type) +
         sizeof(NormalDirectoryDirent::d_namlen) + sizeof(NormalDirectoryDirent::d_reclen);
 
-    const std::string guest_directory{};
-    std::filesystem::file_time_type previous_write_time{};
+    const std::filesystem::path guest_directory{};
 
-    s64 nearest_dirent(const char* buffer, s64 size, s64 offset);
-    void RebuildDirents();
+    u64 suggested_file_offset{};
+    std::filesystem::file_time_type previous_write_time{};
 };
 } // namespace Core::Directories
