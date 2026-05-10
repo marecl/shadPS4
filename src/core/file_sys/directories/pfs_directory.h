@@ -24,7 +24,6 @@ public:
 #pragma pack(pop)
 
     static std::shared_ptr<PfsDirectory> Create(std::string_view guest_path);
-    static s64 validate_dirent(const PfsDirectoryDirent* dirent);
 
     explicit PfsDirectory(std::string_view guest_path);
     ~PfsDirectory() override = default;
@@ -35,6 +34,15 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
+    static s64 validate_dirent(const PfsDirectoryDirent* dirent);
+    static u8 std2pfsFileType(std::filesystem::file_type type);
+    static u8 pfs2bsdFileType(u8 type);
+
+    static u32 next_fileno() {
+        static u32 pool = 10;
+        return ++pool;
+    }
+
     static const u32 dirent_meta_size =
         sizeof(PfsDirectoryDirent::d_fileno) + sizeof(PfsDirectoryDirent::d_type) +
         sizeof(PfsDirectoryDirent::d_namlen) + sizeof(PfsDirectoryDirent::d_reclen);

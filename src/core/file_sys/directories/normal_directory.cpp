@@ -11,20 +11,14 @@
 
 namespace Core::Directories {
 
-#define BP(x)                                                                                      \
-    {                                                                                              \
-        for (u16 i = 0; i < 1; i++) {                                                              \
-            continue;                                                                              \
-        }                                                                                          \
-    }
-
 std::shared_ptr<NormalDirectory> NormalDirectory::Create(std::string_view guest_directory) {
     return std::make_shared<NormalDirectory>(guest_directory);
 }
 
 NormalDirectory::NormalDirectory(std::string_view guest_directory)
     : guest_directory(std::move(std::string(guest_directory))) {
-    this->dirent_fileno_cache.emplace(".", BaseDirectory::next_fileno());  // can be random
+    this->dirent_fileno_cache.emplace(".",
+                                      BaseDirectory::next_fileno());       // can be random
     this->dirent_fileno_cache.emplace("..", BaseDirectory::next_fileno()); // should not be random
 
     RebuildDirents();
@@ -40,11 +34,10 @@ s64 NormalDirectory::pread(void* buf, u64 nbytes, s64 offset) {
     if (offset >= this->directory_size)
         return 0;
 
-    // data is contiguous. read goes like any regular file would: start at offset, read n bytes
-    // output is always aligned up to 512 bytes with 0s
-    // offset - classic. however at the end of read any unused (exceeding dirent buffer size) buffer
-    // space will be left untouched
-    // reclen always sums up to end of current alignment
+    // data is contiguous. read goes like any regular file would: start at offset, read
+    // n bytes output is always aligned up to 512 bytes with 0s offset - classic.
+    // however at the end of read any unused (exceeding dirent buffer size) buffer space
+    // will be left untouched reclen always sums up to end of current alignment
 
     s64 bytes_available =
         std::min<s64>(this->dirent_cache_bin.size() - offset, static_cast<s64>(nbytes));
@@ -137,23 +130,25 @@ s64 NormalDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
     if (max_advance < 12)
         return -2;
 
-    s64 status{};
+    s64 out_offset = offset_adj;
+    s64 status = -3;
 
-    for (s64 out_offset = offset_adj; out_offset <= offset_adj + max_advance; out_offset += 4) {
+    for (auto tmp = offset; tmp < offset_adj; out_offset += 1) {
         const auto* tested_dirent =
             reinterpret_cast<const NormalDirectoryDirent*>(buffer + out_offset);
 
-        if (validate_dirent(tested_dirent) < 0)
+        if (auto vld_status = validate_dirent(tested_dirent); vld_status < 0)
             continue;
 
-        out_offset
+        return out_offset - offset;
     }
 
-    for (s64 out_offset = offset_adj; out_offset <= offset_adj + max_advance; out_offset += 4) {
+    status = -4;
+    for (; out_offset < (offset + max_advance); out_offset += 4) {
         const auto* tested_dirent =
             reinterpret_cast<const NormalDirectoryDirent*>(buffer + out_offset);
 
-        if (validate_dirent(tested_dirent) < 0)
+        if (auto vld_status = validate_dirent(tested_dirent); vld_status < 0)
             continue;
 
         return out_offset - offset;
@@ -173,14 +168,15 @@ void NormalDirectory::RebuildDirents() {
         return;
     previous_write_time = write_time;
 
-    std::vector<std::pair<std::filesystem::path, bool>> file_list{{".", false}, {"..", false}};
+    std::vector<std::pair<std::filesystem::path, u8>> file_list{
+        {".", std2bsdFileType(std::filesystem::file_type::directory)},
+        {"..", std2bsdFileType(std::filesystem::file_type::directory)},
+    };
 
-    mnt->IterateDirectory(guest_directory, [&file_list, this](const std::filesystem::path& ent_path,
-                                                              const bool ent_is_file) {
-        file_list.emplace_back(ent_path, ent_is_file);
-        this->dirent_fileno_cache.emplace(ent_path.filename().string(),
-                                          BaseDirectory::next_fileno());
-    });
+    mnt->IterateDirectory(guest_directory,
+                          [&file_list, this](const auto& file_path, const auto& file_type) {
+                              file_list.emplace_back(file_path, std2bsdFileType(file_type));
+                          });
 
     u64 fcnt = 0; // entry counter, can be removed
     u64 last_reclen_offset = 4;
@@ -191,22 +187,25 @@ void NormalDirectory::RebuildDirents() {
 
     char sector[512]{0};
     s16 sector_remaining = 512;
-    for (const auto& [file_path, is_file] : file_list) {
+    for (const auto& [file_path, file_type] : file_list) {
         if (sector_remaining < 0)
             break;
-        NormalDirectoryDirent tmp{};
-        std::string leaf(file_path.filename().string());
 
-        auto [elem, inserted] = dirent_fileno_cache.emplace(leaf, 0);
+        NormalDirectoryDirent tmp{};
+
+        // fill the cache only with what we found
+        auto [elem, inserted] = dirent_fileno_cache.emplace(file_path, 0);
         if (inserted) {
             elem->second = BaseDirectory::next_fileno();
         }
 
+        const auto file_leaf = elem->first.filename().string();
+
         // prepare dirent
         tmp.d_fileno = elem->second;
-        tmp.d_namlen = elem->first.size();
-        strncpy(tmp.d_name, leaf.data(), tmp.d_namlen + 1);
-        tmp.d_type = (is_file ? 0100000 : 0040000) >> 12;
+        tmp.d_namlen = file_leaf.size();
+        strncpy(tmp.d_name, file_leaf.c_str(), tmp.d_namlen + 1);
+        tmp.d_type = file_type;
         tmp.d_reclen = Common::AlignUp(dirent_meta_size + tmp.d_namlen + 1, 4);
 
         // next element may break 512 byte alignment
@@ -217,7 +216,13 @@ void NormalDirectory::RebuildDirents() {
             *last_reclen_data_ptr += sector_remaining;
 
             sector_remaining = 512;
+
+            auto qidx = dirent_cache_bin.size();
+            memcpy(tmpbuf + qidx, sector, 512);
+            BP();
+
             dirent_cache_bin.insert(dirent_cache_bin.end(), sector, sector + 512);
+
             memset(sector, 0, 512);
         }
 
@@ -228,14 +233,14 @@ void NormalDirectory::RebuildDirents() {
         fcnt++;
     }
 
-    if (sector_remaining > 0 &&
-        sector_remaining < 512) { // 0 is covered by if statement, 512 sector has been just written
+    if (sector_remaining < 512) { // 0 is covered by if statement, 512 sector has been just written
         last_reclen_data_ptr = reinterpret_cast<u16*>(sector + last_reclen_offset);
         *last_reclen_data_ptr += sector_remaining;
         dirent_cache_bin.insert(dirent_cache_bin.end(), sector, sector + 512);
     }
     // i have no idea if this is the case, but lseek returns size aligned to 512
     directory_size = dirent_cache_bin.size();
+    BP();
 
     LOG_ERROR(Kernel_Fs, "Refreshed directory: {} , {} entries indexed , size {}",
               this->guest_directory, fcnt, this->directory_size);

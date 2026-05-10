@@ -187,14 +187,19 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
         for (const auto& entry : std::filesystem::directory_iterator(base_path)) {
             const auto mod_entry_path = mod_path / entry.path().filename();
             const auto patch_entry_path = patch_path / entry.path().filename();
-            if (std::filesystem::exists(mod_entry_path)) {
-                callback(mod_entry_path, !std::filesystem::is_directory(mod_entry_path));
+
+            const auto mod_entry_status = std::filesystem::status(mod_entry_path);
+            const auto patch_entry_status = std::filesystem::status(mod_entry_path);
+
+            if (std::filesystem::exists(mod_entry_status)) {
+                callback(mod_entry_path, mod_entry_status.type());
                 continue;
-            } else if (std::filesystem::exists(patch_entry_path)) {
-                callback(patch_entry_path, !std::filesystem::is_directory(patch_entry_path));
+            } else if (std::filesystem::exists(patch_entry_status)) {
+                callback(patch_entry_path, patch_entry_status.type());
                 continue;
             }
-            callback(entry.path(), !entry.is_directory());
+
+            callback(entry.path(), std::filesystem::status(entry).type());
         }
     }
 
@@ -204,11 +209,15 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
             const auto base_entry_path = base_path / entry.path().filename();
             if (!std::filesystem::exists(base_entry_path)) {
                 const auto mod_entry_path = mod_path / entry.path().filename();
+
+                const auto mod_entry_status = std::filesystem::status(mod_entry_path);
+
                 if (std::filesystem::exists(mod_entry_path)) {
-                    callback(mod_entry_path, !std::filesystem::is_directory(mod_entry_path));
+                    callback(mod_entry_path, mod_entry_status.type());
                     continue;
                 }
-                callback(entry.path(), !entry.is_directory());
+
+                callback(entry.path(), std::filesystem::status(entry).type());
             }
         }
     }
@@ -218,10 +227,16 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
         for (const auto& entry : std::filesystem::directory_iterator(mod_path)) {
             const auto base_entry_path = base_path / entry.path().filename();
             const auto patch_entry_path = patch_path / entry.path().filename();
-            if (!std::filesystem::exists(base_entry_path) &&
-                !std::filesystem::exists(patch_entry_path)) {
-                callback(entry.path(), !entry.is_directory());
+
+            const auto base_entry_status = std::filesystem::status(base_entry_path);
+            const auto patch_entry_status = std::filesystem::status(patch_entry_path);
+
+            if (std::filesystem::exists(base_entry_status) ||
+                std::filesystem::exists(patch_entry_status)) {
+                continue;
             }
+
+            callback(entry.path(), std::filesystem::status(entry).type());
         }
     }
 }

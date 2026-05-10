@@ -80,7 +80,7 @@ s64 BaseDirectory::validate_dirent(const BaseDirectoryDirent* dirent) {
     // if (_reclen != dirent->d_reclen) return -10;
 
     // best case scenario tbh
-    if (Common::IsAligned(dirent->d_reclen, 4))
+    if (!Common::IsAligned(dirent->d_reclen, 4))
         return -10;
     if (dirent->d_fileno == 0)
         return -11;
@@ -102,4 +102,27 @@ s64 BaseDirectory::validate_dirent(const BaseDirectoryDirent* dirent) {
     return 1;
 }
 
+u8 BaseDirectory::std2bsdFileType(std::filesystem::file_type type) {
+    switch (type) {
+    default:
+        break;
+    case std::filesystem::file_type::fifo:
+        return 001;
+    case std::filesystem::file_type::character:
+        return 002;
+    case std::filesystem::file_type::directory:
+        return 004;
+    case std::filesystem::file_type::block:
+        return 006;
+    case std::filesystem::file_type::regular:
+        return 010;
+    case std::filesystem::file_type::symlink:
+        return 012;
+    case std::filesystem::file_type::socket:
+        return 014;
+        // DT_WHT 016 unsupported
+    }
+    // UNREACHABLE_MSG("XD");
+    return 000;
+}
 } // namespace Core::Directories

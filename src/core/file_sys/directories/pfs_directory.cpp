@@ -21,36 +21,30 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
     directory_size = 0;
     dirent_cache_bin.reserve(512);
 
-    typedef struct _scandir_entry_t {
-        u32 fileno;
-        bool is_file;
-    } scandir_entry_t;
-
-    std::vector<std::pair<std::string, scandir_entry_t>> file_list{};
+    std::vector<std::pair<std::filesystem::path, u8>> file_list{};
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
-    mnt->IterateDirectory(guest_directory, [&file_list, this](const std::filesystem::path& ent_path,
-                                                              const bool ent_is_file) {
-        file_list.emplace_back(
-            ent_path.filename().string(),
-            scandir_entry_t{.fileno = BaseDirectory::next_fileno(), .is_file = ent_is_file});
-    });
+    mnt->IterateDirectory(guest_directory,
+                          [&file_list, this](const auto& file_path, const auto& file_type) {
+                              file_list.emplace_back(file_path, std2pfsFileType(file_type));
+                          });
 
-    std::ranges::sort(file_list, std::ranges::less{},
-                      &std::pair<std::string, scandir_entry_t>::first);
+    std::ranges::sort(file_list, std::ranges::less{}, &std::pair<std::filesystem::path, u8>::first);
     file_list.emplace(file_list.begin(), ".",
-                      scandir_entry_t{.fileno = BaseDirectory::next_fileno(), .is_file = false});
+                      std2pfsFileType(std::filesystem::file_type::directory));
     file_list.emplace(file_list.begin(), "..",
-                      scandir_entry_t{.fileno = BaseDirectory::next_fileno(), .is_file = false});
+                      std2pfsFileType(std::filesystem::file_type::directory));
 
-    for (const auto& [leaf, entry_meta] : file_list) {
+    for (const auto& [file_path, file_type] : file_list) {
         PfsDirectoryDirent tmp{};
-        auto elem = dirent_fileno_cache.find(leaf);
 
-        tmp.d_fileno = entry_meta.fileno;
-        tmp.d_namlen = leaf.size();
-        strncpy(tmp.d_name, leaf.data(), tmp.d_namlen + 1);
-        tmp.d_type = entry_meta.is_file ? 2 : 4;
+        const auto file_leaf = file_path.filename().string();
+
+        tmp.d_fileno = PfsDirectory::next_fileno();
+        tmp.d_namlen = file_leaf.size();
+        strncpy(tmp.d_name, file_leaf.c_str(), tmp.d_namlen + 1);
+
+        tmp.d_type = file_type;
         tmp.d_reclen = Common::AlignUp(dirent_meta_size + tmp.d_namlen + 1, 8);
         auto dirent_ptr = reinterpret_cast<const u8*>(&tmp);
 
@@ -165,7 +159,7 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         NormalDirectory::NormalDirectoryDirent normal_dirent{};
         normal_dirent.d_fileno = pfs_dirent->d_fileno;
         normal_dirent.d_reclen = pfs_dirent->d_reclen;
-        normal_dirent.d_type = (pfs_dirent->d_type == 2) ? 8 : 4;
+        normal_dirent.d_type = pfs2bsdFileType(pfs_dirent->d_type);
         normal_dirent.d_namlen = pfs_dirent->d_namlen;
         memcpy(normal_dirent.d_name, pfs_dirent->d_name, pfs_dirent->d_namlen);
 
@@ -233,6 +227,33 @@ s64 PfsDirectory::validate_dirent(const PfsDirectoryDirent* dirent) {
         return -18;
 
     return 1;
+}
+
+u8 PfsDirectory::std2pfsFileType(std::filesystem::file_type type) {
+    switch (type) {
+    default:
+        break;
+    case std::filesystem::file_type::regular:
+        return 002;
+    case std::filesystem::file_type::directory:
+        return 004;
+    }
+    return 000;
+}
+
+u8 PfsDirectory::pfs2bsdFileType(u8 type) {
+    switch (type) {
+    default:
+        break;
+    case 002:
+        // regular
+        return 010;
+    case 004:
+        // directory
+        return 004;
+    }
+    // UNREACHABLE_MSG("XD");
+    return 000;
 }
 
 } // namespace Core::Directories

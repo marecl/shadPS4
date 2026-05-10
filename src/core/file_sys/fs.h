@@ -54,8 +54,8 @@ public:
     std::filesystem::path GetHostPath(std::string_view guest_directory,
                                       bool* is_read_only = nullptr,
                                       HostPathType host_path = HostPathType::Default);
-    using IterateDirectoryCallback =
-        std::function<void(const std::filesystem::path& host_path, bool is_file)>;
+    using IterateDirectoryCallback = std::function<void(const std::filesystem::path& host_path,
+                                                        std::filesystem::file_type type)>;
     void IterateDirectory(std::string_view guest_directory,
                           const IterateDirectoryCallback& callback);
 

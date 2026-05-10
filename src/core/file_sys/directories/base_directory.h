@@ -38,11 +38,12 @@ protected:
     u64 file_offset{0};
     u64 directory_size{0};
     std::vector<char> dirent_cache_bin{};
-    std::unordered_map<std::string, u32> dirent_fileno_cache{};
+    std::unordered_map<std::filesystem::path, u32> dirent_fileno_cache{};
+
+    static s64 validate_dirent(const BaseDirectoryDirent* dirent);
+    static u8 std2bsdFileType(std::filesystem::file_type type);
 
 public:
-    static s64 validate_dirent(const BaseDirectoryDirent* dirent);
-
     explicit BaseDirectory();
     virtual ~BaseDirectory();
 
