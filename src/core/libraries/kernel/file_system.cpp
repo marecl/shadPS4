@@ -1104,7 +1104,7 @@ s64 PS4_SYSV_ABI posix_getdirentries(s32 fd, char* buf, u64 nbytes, s64* basep) 
 s64 PS4_SYSV_ABI sceKernelGetdirentries(s32 fd, char* buf, u64 nbytes, s64* basep) {
     s64 result = GetDents(fd, buf, nbytes, basep);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        // LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;

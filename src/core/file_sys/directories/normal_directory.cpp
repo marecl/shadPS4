@@ -57,8 +57,8 @@ s64 NormalDirectory::lseek(s64 offset, s32 whence) {
     if (auto _tmp = nearest_dirent(this->dirent_cache_bin.data(), this->file_offset); _tmp >= 0)
         // keep positive values only though
         this->suggested_file_offset = _tmp;
-    else
-        LOG_ERROR(Kernel_Fs, "Error during seeking dirent {}", _tmp);
+    // else
+    // LOG_ERROR(Kernel_Fs, "Error during seeking dirent {}", _tmp);
 
     return this->file_offset;
 }
