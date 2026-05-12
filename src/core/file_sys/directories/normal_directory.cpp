@@ -53,13 +53,7 @@ s64 NormalDirectory::lseek(s64 offset, s32 whence) {
     // refresh here, so correct offset is cached
     // we're spending a bit more time here, but lseek() isn't called that often
     // would be a waste if done every time getdents is called
-    this->suggested_file_offset = this->file_offset;
-    if (auto _tmp = nearest_dirent(this->dirent_cache_bin.data(), this->file_offset); _tmp >= 0)
-        // keep positive values only though
-        this->suggested_file_offset = _tmp;
-    // else
-    // LOG_ERROR(Kernel_Fs, "Error during seeking dirent {}", _tmp);
-
+    this->suggested_file_offset = nearest_dirent(this->dirent_cache_bin.data(), this->file_offset);
     return this->file_offset;
 }
 
@@ -92,6 +86,9 @@ s64 NormalDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         return 0;
     }
 
+    if (this->suggested_file_offset < this->file_offset)
+        this->suggested_file_offset = this->file_offset;
+
     // we can now assume that offset is always smaller than size
     // diff between real and suggested file offset is consumed
     // allowed count = total
@@ -108,7 +105,7 @@ s64 NormalDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         bytes_written += to_copy;
     }
 
-    while (bytes_written < allowed_count) {
+    while (read_offset < directory_size) {
         const auto* dirent =
             reinterpret_cast<const NormalDirectoryDirent*>(dirent_buffer + read_offset);
 
@@ -117,7 +114,6 @@ s64 NormalDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
             break;
         }
 
-        // probably redundant, leaving for verbosity
         if ((read_offset + dirent->d_reclen) > apparent_end_down) {
             // can't read further than last full sector
             break;
@@ -222,42 +218,29 @@ void NormalDirectory::RebuildDirents() {
               this->guest_directory.string(), fcnt, this->directory_size);
 }
 
-// -1 on not found
+// original offset on
 // this only used by getdirentries
 s64 NormalDirectory::nearest_dirent(const char* buffer, s64 offset) {
-    // max size is 272, last 23 bytes are never starting a dirent
-    s64 status = -1;
-    s64 offset_adj = Common::IsAligned(offset, 4) ? offset : Common::AlignUpAligned(offset, 4);
-    s64 max_advance = std::min(s64(directory_size) - offset_adj, s64(256 + dirent_meta_size));
-
-    status = -2;
-    if (max_advance < 12)
-        return status;
-
-    s64 out_offset = offset_adj;
-    status = -3;
-    for (; out_offset < offset_adj; out_offset += 1) {
-        const auto* tested_dirent =
-            reinterpret_cast<const NormalDirectoryDirent*>(buffer + out_offset);
-
-        if (auto vld_status = validate_dirent(tested_dirent); vld_status < 0)
-            continue;
-
-        return out_offset;
+    // dirent can take up an entire sector
+    s64 max_advance = std::min(s64(directory_size) - offset, s64(512));
+    if (max_advance < 12) {
+        // minimal dirent size
+        return offset;
     }
 
-    status = -4;
-    for (; out_offset < (offset + max_advance); out_offset += 4) {
+    // there is no point in testing when offset is misaligned
+    s64 new_offset = Common::IsAligned(offset, 4) ? offset : Common::AlignUpAligned(offset, 4);
+    for (; new_offset < (offset + max_advance); new_offset += 4) {
         const auto* tested_dirent =
-            reinterpret_cast<const NormalDirectoryDirent*>(buffer + out_offset);
+            reinterpret_cast<const NormalDirectoryDirent*>(buffer + new_offset);
 
-        if (auto vld_status = validate_dirent(tested_dirent); vld_status < 0)
+        if (validate_dirent(tested_dirent) < 0)
             continue;
 
-        return out_offset;
+        return new_offset;
     }
 
-    return status;
+    return offset;
 }
 
 } // namespace Core::Directories

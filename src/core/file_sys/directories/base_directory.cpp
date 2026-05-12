@@ -92,7 +92,7 @@ s64 BaseDirectory::validate_dirent(const BaseDirectoryDirent* dirent) {
         return -13;
     if (dirent->d_reclen == 0)
         return -14;
-    if (dirent->d_reclen < 12 || dirent->d_reclen > 496)
+    if (dirent->d_reclen < 12 || dirent->d_reclen > 512)
         return -16;
     if (dirent->d_type > 15)
         return -17;

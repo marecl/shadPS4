@@ -15,9 +15,6 @@ public:
     using NormalDirectoryDirent = BaseDirectoryDirent;
 
     static std::shared_ptr<NormalDirectory> Create(std::string_view guest_path);
-    static s64 validate_dirent(const NormalDirectoryDirent* dirent) {
-        return BaseDirectory::validate_dirent(dirent);
-    }
 
     explicit NormalDirectory(std::string_view guest_path);
     ~NormalDirectory() override = default;
@@ -28,8 +25,12 @@ public:
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
-    s64 nearest_dirent(const char* buffer, s64 offset);
     void RebuildDirents();
+
+    [[nodiscard]] s64 nearest_dirent(const char* buffer, s64 offset);
+    [[nodiscard]] static s64 validate_dirent(const NormalDirectoryDirent* dirent) {
+        return BaseDirectory::validate_dirent(dirent);
+    }
 
     static const u32 dirent_meta_size =
         sizeof(NormalDirectoryDirent::d_fileno) + sizeof(NormalDirectoryDirent::d_type) +

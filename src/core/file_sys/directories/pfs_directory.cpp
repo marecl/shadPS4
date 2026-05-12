@@ -90,9 +90,7 @@ s64 PfsDirectory::lseek(s64 offset, s32 whence) {
     // refresh here, so correct offset is cached
     // we're spending a bit more time here, but lseek() isn't called that often
     // would be a waste if done every time getdents is called
-    this->suggested_file_offset =
-        this->file_offset + nearest_dirent(this->dirent_cache_bin.data(),
-                                           this->dirent_cache_bin.size(), this->file_offset);
+    this->suggested_file_offset = nearest_dirent(this->dirent_cache_bin.data(), this->file_offset);
     return this->file_offset;
 }
 
@@ -105,56 +103,61 @@ s32 PfsDirectory::fstat(Libraries::Kernel::OrbisKernelStat* stat) {
 }
 
 s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
-    if (basep)
-        *basep = file_offset;
+    // file offset - current offset, used for boundary calculations
+    // suggested file offset - next dirent
+    // all data between those two is consumed
 
-    // down-aligned apparent end, last crossed sector
-    auto apparent_end = this->file_offset + nbytes;
-    auto apparent_end_down = Common::AlignDownAligned(apparent_end, 512);
-    auto apparent_end_up = Common::AlignUpAligned(apparent_end, 512);
-    auto file_offset_aligned = Common::AlignDownAligned(this->file_offset, 512);
+    if (nbytes == 48 && this->file_offset == 464)
+        LOG_ERROR(Kernel_Fs, "XDXDXD");
 
-    auto file_offset_up = Common::AlignUpAligned(this->file_offset, 512);
+    s64 apparent_end = this->file_offset + nbytes;
+    s64 apparent_end_down = Common::AlignDownAligned(apparent_end, 512);
+    s64 file_offset_down = Common::AlignDownAligned(file_offset, 512);
 
-    if (apparent_end_up == file_offset_up)
+    // within the same sector, no 512b alignment inbetween
+    // applies to full dirents only
+    if (apparent_end_down <= file_offset_down) {
         return ORBIS_KERNEL_ERROR_EINVAL;
+    }
 
-    if (nbytes < (file_offset_up - this->file_offset))
-        return 0;
-
-    // navigate to latest backtracked dirent
-    if (this->suggested_file_offset < this->file_offset)
-        this->file_offset = this->suggested_file_offset;
-
-    apparent_end_down =
-        std::min(this->dirent_cache_bin.size() - this->file_offset, apparent_end_down);
-    apparent_end_down = std::min(nbytes, apparent_end_down);
-    u64 bytes_written = 0;
-    u64 buffer_position = this->file_offset;
+    // now that offset
+    if (nullptr != basep)
+        *basep = file_offset;
 
     // same as others, we just don't need a variable
     if (this->file_offset >= this->dirent_cache_bin.size()) {
         this->file_offset = this->directory_size;
-        goto pfs_getdents_end;
+        this->suggested_file_offset = this->directory_size;
+        return 0;
     }
 
-    while (bytes_written < apparent_end_down) {
+    // we can now assume that offset is always smaller than size
+    // diff between real and suggested file offset is consumed
+    // allowed count = total
+    const char* dirent_buffer = this->dirent_cache_bin.data();
+    s64 allowed_count = std::min(apparent_end_down - file_offset, nbytes);
+    u64 bytes_written = 0;
+    u64 read_offset = this->suggested_file_offset;
+    u64 write_offset = 0;
+
+    while (read_offset < directory_size) {
         const PfsDirectoryDirent* pfs_dirent =
-            reinterpret_cast<PfsDirectoryDirent*>(this->dirent_cache_bin.data() + buffer_position);
+            reinterpret_cast<const PfsDirectoryDirent*>(dirent_buffer + read_offset);
 
-        // bad, incomplete or OOB entry
-        if (validate_dirent(pfs_dirent) <= 0)
+        if (int chuj = this->validate_dirent(pfs_dirent); chuj < 0) {
+            // probably OOB
             break;
+        }
 
-        if ((bytes_written + pfs_dirent->d_reclen) > nbytes)
-            // dirents are aligned to the last full one
+        // read + reclen is an invalid break reason here
+        // read and true read (dirent) are different:
+        //   read - raw pointer, aligned to data
+        //   true read - aligned to dirent, ignoring sector boundary
+
+        if ((bytes_written + pfs_dirent->d_reclen) > allowed_count) {
+            // last dirent must be complete
             break;
-
-        // if this dirent breaks alignment, skip
-        // dirents are count-aligned here, excess data is simply not written
-        // if (Common::AlignUp(buffer_position, count) !=
-        //     Common::AlignUp(buffer_position + pfs_dirent->d_reclen, count))
-        //     break;
+        }
 
         // reclen for both is the same despite difference in var sizes, extra 0s are padded after
         // the name
@@ -167,41 +170,39 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
 
         memcpy(static_cast<u8*>(buf) + bytes_written, &normal_dirent, normal_dirent.d_reclen);
         bytes_written += normal_dirent.d_reclen;
-        buffer_position += normal_dirent.d_reclen;
+        read_offset += normal_dirent.d_reclen;
     }
 
-    this->file_offset = (buffer_position >= this->dirent_cache_bin.size())
-                            ? directory_size
+    // directory size is for outsiders, aligned to 65536
+    this->file_offset = (read_offset >= this->dirent_cache_bin.size())
+                            ? this->directory_size
                             : (file_offset + bytes_written);
-pfs_getdents_end:
-    this->suggested_file_offset = this->file_offset;
+    this->suggested_file_offset = file_offset;
     return bytes_written;
 }
 
 // -1 on not found
 // this only used by getdirentries
-s64 PfsDirectory::nearest_dirent(const char* buffer, s64 size, s64 offset) {
-    // max size is 272, last 23 bytes are never starting a dirent
-    s64 offset_adj = Common::IsAligned(offset, 8) ? offset : Common::AlignUpAligned(offset, 8);
-    s64 max_advance = std::min(size - offset_adj, s64(256 + dirent_meta_size));
-    if (max_advance < 24)
-        return -2;
-
-    s64 status{};
-
-    for (s64 out_offset = offset_adj; out_offset <= offset_adj + max_advance; out_offset += 8) {
-        const NormalDirectory::NormalDirectoryDirent* tested_dirent =
-            reinterpret_cast<const NormalDirectory::NormalDirectoryDirent*>(buffer + out_offset);
-        status = NormalDirectory::validate_dirent(tested_dirent);
-
-        if (status < 0)
-            continue;
-
-        return out_offset - offset;
+s64 PfsDirectory::nearest_dirent(const char* buffer, s64 offset) {
+    s64 max_advance = std::min(s64(directory_size) - offset, s64(256 + dirent_meta_size));
+    if (max_advance < 24) {
+        // minimal dirent size
+        return offset;
     }
 
-    // LogError("No match");
-    return status;
+    // there is no point in testing when offset is misaligned
+    s64 new_offset = Common::IsAligned(offset, 8) ? offset : Common::AlignUpAligned(offset, 8);
+    for (; new_offset < (offset + max_advance); new_offset += 8) {
+        const auto* tested_dirent =
+            reinterpret_cast<const PfsDirectoryDirent*>(buffer + new_offset);
+
+        if (this->validate_dirent(tested_dirent) < 0)
+            continue;
+
+        return new_offset;
+    }
+
+    return offset;
 }
 
 s64 PfsDirectory::validate_dirent(const PfsDirectoryDirent* dirent) {
