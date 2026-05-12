@@ -521,7 +521,7 @@ s64 PS4_SYSV_ABI posix_lseek(s32 fd, s64 offset, s32 whence) {
 s64 PS4_SYSV_ABI sceKernelLseek(s32 fd, s64 offset, s32 whence) {
     s64 result = posix_lseek(fd, offset, whence);
     if (result < 0) {
-        LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
+        // LOG_ERROR(Kernel_Fs, "error = {}", *__Error());
         return ErrnoToSceKernelError(*__Error());
     }
     return result;

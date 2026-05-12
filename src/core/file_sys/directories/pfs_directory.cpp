@@ -107,9 +107,6 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     // suggested file offset - next dirent
     // all data between those two is consumed
 
-    if (nbytes == 48 && this->file_offset == 464)
-        LOG_ERROR(Kernel_Fs, "XDXDXD");
-
     s64 apparent_end = this->file_offset + nbytes;
     s64 apparent_end_down = Common::AlignDownAligned(apparent_end, 512);
     s64 file_offset_down = Common::AlignDownAligned(file_offset, 512);
@@ -124,16 +121,21 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     if (nullptr != basep)
         *basep = file_offset;
 
-    // same as others, we just don't need a variable
+    if (this->suggested_file_offset < 0) {
+        // no valid dirent found
+        this->file_offset = this->directory_size;
+        this->suggested_file_offset = this->directory_size;
+        return 0;
+    }
+
     if (this->file_offset >= this->dirent_cache_bin.size()) {
+        // oob
         this->file_offset = this->directory_size;
         this->suggested_file_offset = this->directory_size;
         return 0;
     }
 
     // we can now assume that offset is always smaller than size
-    // diff between real and suggested file offset is consumed
-    // allowed count = total
     const char* dirent_buffer = this->dirent_cache_bin.data();
     s64 allowed_count = std::min(apparent_end_down - file_offset, nbytes);
     u64 bytes_written = 0;
@@ -144,7 +146,7 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         const PfsDirectoryDirent* pfs_dirent =
             reinterpret_cast<const PfsDirectoryDirent*>(dirent_buffer + read_offset);
 
-        if (int chuj = this->validate_dirent(pfs_dirent); chuj < 0) {
+        if (this->validate_dirent(pfs_dirent) < 0) {
             // probably OOB
             break;
         }
@@ -187,7 +189,7 @@ s64 PfsDirectory::nearest_dirent(const char* buffer, s64 offset) {
     s64 max_advance = std::min(s64(directory_size) - offset, s64(256 + dirent_meta_size));
     if (max_advance < 24) {
         // minimal dirent size
-        return offset;
+        return -1;
     }
 
     // there is no point in testing when offset is misaligned
@@ -202,7 +204,7 @@ s64 PfsDirectory::nearest_dirent(const char* buffer, s64 offset) {
         return new_offset;
     }
 
-    return offset;
+    return -1;
 }
 
 s64 PfsDirectory::validate_dirent(const PfsDirectoryDirent* dirent) {
