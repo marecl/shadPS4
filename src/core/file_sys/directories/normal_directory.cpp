@@ -136,6 +136,14 @@ s64 NormalDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
 }
 
 void NormalDirectory::RebuildDirents() {
+    /**
+     * TODO: Read divides into 64k blocks, so if the last dirent does not fit,
+     * it gets moved to the next 64k block.
+     * there's a catch though - it does not add remaining space to reclen!
+     * what this means, is that there's a random spot of 0's at the end of the block.
+     * this changes nothing for read.
+     * getdirentries however jump straight to the next dirent i.e. there's no gap
+     */
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
     const std::filesystem::file_time_type write_time =
@@ -222,11 +230,13 @@ void NormalDirectory::RebuildDirents() {
 // this only used by getdirentries
 s64 NormalDirectory::nearest_dirent(const char* buffer, s64 offset) {
     // dirent can take up an entire sector
-    s64 max_advance = std::min(s64(directory_size) - offset, s64(512));
+    s64 max_advance = directory_size - offset;
     if (max_advance < 12) {
-        // minimal dirent size
-        return offset;
+        // either dirent is too small or we're oob
+        return this->directory_size;
     }
+
+    max_advance = std::min(max_advance, s64(512));
 
     // there is no point in testing when offset is misaligned
     s64 new_offset = Common::IsAligned(offset, 4) ? offset : Common::AlignUpAligned(offset, 4);
@@ -240,7 +250,7 @@ s64 NormalDirectory::nearest_dirent(const char* buffer, s64 offset) {
         return new_offset;
     }
 
-    return offset;
+    return this->directory_size;
 }
 
 } // namespace Core::Directories

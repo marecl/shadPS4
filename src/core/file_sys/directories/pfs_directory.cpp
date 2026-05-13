@@ -121,13 +121,6 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     if (nullptr != basep)
         *basep = file_offset;
 
-    if (this->suggested_file_offset < 0) {
-        // no valid dirent found
-        this->file_offset = this->directory_size;
-        this->suggested_file_offset = this->directory_size;
-        return 0;
-    }
-
     if (this->file_offset >= this->dirent_cache_bin.size()) {
         // oob
         this->file_offset = this->directory_size;
@@ -186,11 +179,13 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
 // -1 on not found
 // this only used by getdirentries
 s64 PfsDirectory::nearest_dirent(const char* buffer, s64 offset) {
-    s64 max_advance = std::min(s64(directory_size) - offset, s64(256 + dirent_meta_size));
+    s64 max_advance = directory_size - offset;
     if (max_advance < 24) {
-        // minimal dirent size
-        return -1;
+        // either dirent is too small or we're oob
+        return this->directory_size;
     }
+
+    max_advance = std::min(max_advance, s64(256 + dirent_meta_size));
 
     // there is no point in testing when offset is misaligned
     s64 new_offset = Common::IsAligned(offset, 8) ? offset : Common::AlignUpAligned(offset, 8);
@@ -204,7 +199,7 @@ s64 PfsDirectory::nearest_dirent(const char* buffer, s64 offset) {
         return new_offset;
     }
 
-    return -1;
+    return this->directory_size;
 }
 
 s64 PfsDirectory::validate_dirent(const PfsDirectoryDirent* dirent) {
