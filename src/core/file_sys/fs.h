@@ -22,6 +22,9 @@ struct Resolver;
 
 namespace Core::FileSys {
 
+constexpr u16 BSD_PATH_LENGTH_LIMIT = 1024;
+constexpr u16 BSD_FILE_NAME_LENGTH_LIMIT = 255;
+
 class MntPoints {
 #ifdef _WIN64
     static constexpr bool NeedsCaseInsensitiveSearch = false;
