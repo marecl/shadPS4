@@ -136,18 +136,10 @@ s64 NormalDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
 }
 
 void NormalDirectory::RebuildDirents() {
-    /**
-     * TODO: Read divides into 64k blocks, so if the last dirent does not fit,
-     * it gets moved to the next 64k block.
-     * there's a catch though - it does not add remaining space to reclen!
-     * what this means, is that there's a random spot of 0's at the end of the block.
-     * this changes nothing for read.
-     * getdirentries however jump straight to the next dirent i.e. there's no gap
-     */
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
     const std::filesystem::file_time_type write_time =
-        std::filesystem::last_write_time(mnt->GetHostPath(this->guest_directory.c_str(), nullptr));
+        std::filesystem::last_write_time(mnt->GetHostPath(std::string_view(this->guest_directory.c_str()), nullptr));
 
     // regenerate only when contents changed
     if (write_time == previous_write_time)

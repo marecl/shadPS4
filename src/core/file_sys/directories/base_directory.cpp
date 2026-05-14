@@ -82,22 +82,17 @@ s64 BaseDirectory::validate_dirent(const BaseDirectoryDirent* dirent) {
     // best case scenario tbh
     if (!Common::IsAligned(dirent->d_reclen, 4))
         return -10;
-    if (dirent->d_fileno == 0)
-        return -11;
-
-    // these don't fail so often
-    if (dirent->d_namlen == 0)
-        return -12;
-    if (dirent->d_type == 0)
-        return -13;
-    if (dirent->d_reclen == 0)
-        return -14;
     if (dirent->d_reclen < 12 || dirent->d_reclen > 512)
-        return -16;
+        return -11;
     if (dirent->d_type > 15)
-        return -17;
+        return -12;
+    // unlikely to trigger anything at this point, left for verbosity
+    if (dirent->d_fileno == 0)
+        return -13;
+    if (dirent->d_namlen == 0)
+        return -14;
     if (strnlen(dirent->d_name, 255) != dirent->d_namlen)
-        return -18;
+        return -15;
 
     return 1;
 }
