@@ -21,7 +21,6 @@ public:
     s64 readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) override;
     s64 writev(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt) override;
     s64 preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt, s64 offset) override;
-    s64 lseek(s64 offset, s32 whence) override;
     s64 read(void* buf, u64 nbytes) override;
     s32 fstat(Libraries::Kernel::OrbisKernelStat* sb) override;
     s32 fsync() override;

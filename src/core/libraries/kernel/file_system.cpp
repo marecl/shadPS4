@@ -19,6 +19,7 @@
 #include "core/file_sys/devices/srandom_device.h"
 #include "core/file_sys/devices/urandom_device.h"
 #include "core/file_sys/devices/zero_device.h"
+#include "core/file_sys/directories/cache.h"
 #include "core/file_sys/directories/normal_directory.h"
 #include "core/file_sys/directories/pfs_directory.h"
 #include "core/file_sys/fs.h"
