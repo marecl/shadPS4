@@ -207,6 +207,12 @@ bool HostFsBackend::Exists(std::string_view rel_path) {
     return std::filesystem::exists(Resolve(rel_path), ec);
 }
 
+std::filesystem::file_type HostFsBackend::EntryType(std::string_view rel_path) {
+    std::error_code ec;
+    std::filesystem::file_status status = std::filesystem::status(Resolve(rel_path), ec);
+    return status.type();
+}
+
 bool HostFsBackend::IsDirectory(std::string_view rel_path) {
     std::error_code ec;
     return std::filesystem::is_directory(Resolve(rel_path), ec);

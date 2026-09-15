@@ -191,6 +191,7 @@ public:
     virtual ~IBackend() = default;
 
     virtual bool Exists(std::string_view rel_path) = 0;
+    virtual std::filesystem::file_type EntryType(std::string_view rel_path) = 0;
     virtual bool IsDirectory(std::string_view rel_path) = 0;
     virtual std::unique_ptr<IFile> Open(std::string_view rel_path,
                                         Common::FS::FileAccessMode mode) = 0;

@@ -38,7 +38,6 @@ namespace Core::FileSys {
 constexpr u16 BSD_PATH_LENGTH_LIMIT = 1024;
 constexpr u16 BSD_FILE_NAME_LENGTH_LIMIT = 255;
 
-class MntPoints {
 #ifdef _WIN64
 inline constexpr bool NeedsCaseInsensitiveSearch = false;
 #else
@@ -81,6 +80,9 @@ public:
     /// Returns true if the guest path exists in any backend of the
     /// mount stack. Mirrors fs::exists() on the resolved host path.
     bool Exists(std::string_view guest_path);
+
+    /// Returns std::filesystem file type
+    std::filesystem::file_type EntryType(std::string_view guest_path);
 
     /// Returns true if the guest path resolves to a directory in any
     /// backend of the mount stack.

@@ -110,6 +110,7 @@ public:
     }
 
     bool Exists(std::string_view rel_path) override;
+    std::filesystem::file_type EntryType(std::string_view rel_path) override;
     bool IsDirectory(std::string_view rel_path) override;
 
     std::unique_ptr<IFile> Open(std::string_view rel_path,

@@ -361,24 +361,24 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
     }
 
     // Prepend "." and ".." (PS4 exposes these as file entries via getdents).
-    callback(base_host / ".", false);
-    callback(base_host / "..", false);
+    callback(base_host / ".", std::filesystem::file_type::directory);
+    callback(base_host / "..", std::filesystem::file_type::directory);
 
-    const auto resolve =
-        [&](const std::string& leaf) -> std::optional<std::pair<std::filesystem::path, bool>> {
+    const auto resolve = [&](const std::string& leaf)
+        -> std::optional<std::pair<std::filesystem::path, std::filesystem::file_type>> {
         const std::string entry_rel = rel.empty() ? leaf : rel + "/" + leaf;
         for (const auto& b : mount->backends) {
             if (!b->Exists(entry_rel)) {
                 continue;
             }
-            const bool is_dir = b->IsDirectory(entry_rel);
+            const auto entry_type = b->EntryType(entry_rel);
             std::filesystem::path host;
             if (auto root = b->RootHostPath(); root.has_value()) {
                 host = rel.empty() ? (*root / leaf) : (*root / rel / leaf);
             } else {
                 host = base_host / leaf;
             }
-            return std::make_pair(host, is_dir);
+            return std::make_pair(host, entry_type);
         }
         return std::nullopt;
     };
@@ -393,7 +393,7 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
         while (dir->Next(entry)) {
             if (auto hit = resolve(entry.name)) {
                 emitted.insert(emit_key(entry.name));
-                callback(hit->first, /*is_file=*/!hit->second);
+                callback(hit->first, hit->second);
             }
         }
     }
@@ -411,10 +411,10 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
             }
             if (auto hit = resolve(entry.name)) {
                 emitted.insert(emit_key(entry.name));
-                callback(hit->first, /*is_file=*/!hit->second);
+                callback(hit->first, hit->second);
             }
 
-            callback(entry.path(), std::filesystem::status(entry).type());
+            callback(entry.name, std::filesystem::status(base_host/rel/entry.name).type());
         }
     }
 }
@@ -437,22 +437,26 @@ bool MntPoints::Exists(std::string_view guest_path) {
     return false;
 }
 
-bool MntPoints::IsDirectory(std::string_view guest_path) {
+std::filesystem::file_type MntPoints::EntryType(std::string_view guest_path) {
     const auto corrected = SanitizeGuestPath(guest_path);
     if (!corrected) {
-        return false;
+        return std::filesystem::file_type::none;
     }
     const auto mount = GetMount(*corrected);
     if (!mount || mount->backends.empty()) {
-        return false;
+        return std::filesystem::file_type::none;
     }
     const auto rel = RelativeToMount(*corrected, *mount);
     for (const auto& backend : mount->backends) {
         if (backend->Exists(rel)) {
-            return backend->IsDirectory(rel);
+            return backend->EntryType(rel);
         }
     }
-    return false;
+    return std::filesystem::file_type::none;
+}
+
+bool MntPoints::IsDirectory(std::string_view guest_path) {
+    return EntryType(guest_path) == std::filesystem::file_type::directory;
 }
 
 std::unique_ptr<IFile> MntPoints::Open(std::string_view guest_path, bool writable) {

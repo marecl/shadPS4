@@ -308,6 +308,13 @@ bool ZArchiveBackend::Exists(std::string_view rel_path) {
     return LookUp(rel_path, /*allow_file=*/true, /*allow_directory=*/true) != ZARCHIVE_INVALID_NODE;
 }
 
+std::filesystem::file_type ZArchiveBackend::EntryType(std::string_view rel_path) {
+    if (this->IsDirectory(rel_path))
+        return std::filesystem::file_type::directory;
+    // it's not a directory so might as well be an error *shrug*
+    return std::filesystem::file_type::regular;
+}
+
 bool ZArchiveBackend::IsDirectory(std::string_view rel_path) {
     const auto node = LookUp(rel_path, /*allow_file=*/true, /*allow_directory=*/true);
     if (node == ZARCHIVE_INVALID_NODE) {
