@@ -35,6 +35,10 @@ namespace Core::FileSys {
 [[nodiscard]] std::optional<std::filesystem::path> ResolveGameRoot(
     const std::filesystem::path& root);
 
+constexpr u16 BSD_PATH_LENGTH_LIMIT = 1024;
+constexpr u16 BSD_FILE_NAME_LENGTH_LIMIT = 255;
+
+class MntPoints {
 #ifdef _WIN64
 inline constexpr bool NeedsCaseInsensitiveSearch = false;
 #else

@@ -23,6 +23,15 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
     suggested_file_offset = 0;
     dirent_cache_bin.reserve(512);
 
+    /**
+     * TODO: Read divides into 64k blocks, so if the last dirent does not fit,
+     * it gets moved to the next 64k block.
+     * there's a catch though - it does not add remaining space to reclen!
+     * what this means, is that there's a random spot of 0's at the end of the block.
+     * this changes nothing for read.
+     * getdirentries however jump straight to the next dirent i.e. there's no gap
+     */
+
     std::vector<std::pair<std::filesystem::path, u8>> file_list{};
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
@@ -207,25 +216,20 @@ s64 PfsDirectory::validate_dirent(const PfsDirectoryDirent* dirent) {
     _reclen = Common::IsAligned(_reclen, 8) ? _reclen : Common::AlignUpAligned(_reclen, 8);
     if (_reclen != dirent->d_reclen)
         return -10;
-    if (dirent->d_fileno == 0)
-        return -11;
 
     // these don't fail so often
-    if (dirent->d_namlen == 0)
-        return -12;
-    if (dirent->d_type == 0)
-        return -13;
-    if (dirent->d_reclen == 0)
-        return -14;
-    if ((dirent->d_reclen & 0x07) != 0)
-        return -15;
+    // known values first
     if (dirent->d_reclen < 24 || dirent->d_reclen > 272)
-        return -16;
+        return -11;
     if (dirent->d_type > 15)
-        return -17;
+        return -12;
+    // unlikely to trigger anything at this point, left for verbosity
+    if (dirent->d_fileno == 0)
+        return -13;
+    if (dirent->d_namlen == 0)
+        return -14;
     if (strnlen(dirent->d_name, 255) != dirent->d_namlen)
-        return -18;
-
+        return -15;
     return 1;
 }
 
