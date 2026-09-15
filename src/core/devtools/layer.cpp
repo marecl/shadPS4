@@ -30,6 +30,7 @@ using L = ::Core::Devtools::Layer;
 
 static bool show_simple_fps = false;
 static bool visibility_toggled = false;
+static float fps_anchor_width = FLT_MAX;
 static bool show_quit_window = false;
 
 static bool show_volume = false;
@@ -123,12 +124,8 @@ void L::DrawMenuBar() {
             ImGui::EndMenu();
         }
         if (BeginMenu("Debug")) {
-            if (MenuItem("Memory map")) {
-                memory_map.open = true;
-            }
-            if (MenuItem("Module list")) {
-                module_list.open = true;
-            }
+            MenuItem("Memory map", nullptr, &memory_map.open);
+            MenuItem("Module list", nullptr, &module_list.open);
             ImGui::EndMenu();
         }
 
@@ -303,6 +300,18 @@ static void LoadSettings(const char* line) {
         frame_graph.is_open = i != 0;
         return;
     }
+    if (sscanf(line, "show_shader_list=%d", &i) == 1) {
+        shader_list.open = i != 0;
+        return;
+    }
+    if (sscanf(line, "show_memory_map=%d", &i) == 1) {
+        memory_map.open = i != 0;
+        return;
+    }
+    if (sscanf(line, "show_module_list=%d", &i) == 1) {
+        module_list.open = i != 0;
+        return;
+    }
     if (sscanf(line, "dump_frame_count=%d", &i) == 1) {
         dump_frame_count = i;
         return;
@@ -344,6 +353,9 @@ void L::SetupSettings() {
         buf->appendf("fps_scale=%f\n", fps_scale);
         buf->appendf("show_advanced_debug=%d\n", DebugState.IsShowingDebugMenuBar());
         buf->appendf("show_frame_graph=%d\n", frame_graph.is_open);
+        buf->appendf("show_shader_list=%d\n", shader_list.open);
+        buf->appendf("show_memory_map=%d\n", memory_map.open);
+        buf->appendf("show_module_list=%d\n", module_list.open);
         buf->appendf("dump_frame_count=%d\n", dump_frame_count);
         buf->append("\n");
         buf->appendf("[%s][CmdList]\n", handler->TypeName);
@@ -360,6 +372,10 @@ void L::SetupSettings() {
     DockBuilderSetNodePos(dock_id, ImVec2{450.0, 150.0});
     DockBuilderSetNodeSize(dock_id, ImVec2{400.0, 500.0});
     DockBuilderFinish(dock_id);
+}
+
+bool L::ShouldKeepDrawing() {
+    return DebugState.IsShowingDebugMenuBar();
 }
 
 void L::Draw() {
@@ -396,6 +412,11 @@ void L::Draw() {
         if (Begin("Video Info", nullptr,
                   ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDecoration |
                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking)) {
+            if (const float width = GetIO().DisplaySize.x; width != fps_anchor_width) {
+                visibility_toggled |= GetWindowPos().x + GetCurrentWindowRead()->SizeFull.x >=
+                                      fps_anchor_width - 1.0f;
+                fps_anchor_width = width;
+            }
             // Set window position to top left if it was toggled on
             if (visibility_toggled) {
                 SetWindowPos("Video Info", {999999.0f, 0.0f}, ImGuiCond_Always);

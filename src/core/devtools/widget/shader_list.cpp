@@ -179,13 +179,13 @@ bool ShaderList::Selection::DrawShader(DebugStateType::ShaderDump& value) {
             DebugState.ShowDebugMessage(msg);
         }
         if (compile) {
-            static std::map<Shader::LogicalStage, std::string> stage_arg = {
-                {Shader::LogicalStage::Vertex, "vert"},
-                {Shader::LogicalStage::TessellationControl, "tesc"},
-                {Shader::LogicalStage::TessellationEval, "tese"},
-                {Shader::LogicalStage::Geometry, "geom"},
-                {Shader::LogicalStage::Fragment, "frag"},
-                {Shader::LogicalStage::Compute, "comp"},
+            static std::map<Shader::SwStage, std::string> stage_arg = {
+                {Shader::SwStage::Vertex, "vert"},
+                {Shader::SwStage::TessellationControl, "tesc"},
+                {Shader::SwStage::TessellationEval, "tese"},
+                {Shader::SwStage::Geometry, "geom"},
+                {Shader::SwStage::Fragment, "frag"},
+                {Shader::SwStage::Compute, "comp"},
             };
             auto stage = stage_arg.find(value.l_stage);
             if (stage == stage_arg.end()) {
@@ -269,7 +269,10 @@ void ShaderList::Draw() {
             snprintf(name, sizeof(name), "%s", shader.name.c_str());
         }
         if (ButtonEx(name, {width, 20.0f}, ImGuiButtonFlags_NoHoveredOnFocus)) {
-            open_shaders.emplace_back(i);
+            if (std::find_if(open_shaders.begin(), open_shaders.end(),
+                             [i](auto& v) { return v.index == i; }) == open_shaders.end()) {
+                open_shaders.emplace_back(i);
+            }
         }
         i++;
     }

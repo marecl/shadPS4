@@ -7,9 +7,8 @@
 #include "common/types.h"
 
 namespace Shader {
-struct FragmentRuntimeInfo;
-struct VertexRuntimeInfo;
-} // namespace Shader
+struct HwFragmentRuntimeInfo;
+}
 
 namespace Shader::Backend::SPIRV {
 
@@ -20,7 +19,6 @@ enum class AuxShaderType : u32 {
 };
 
 [[nodiscard]] std::vector<u32> EmitAuxilaryTessShader(AuxShaderType type,
-                                                      const VertexRuntimeInfo& vs_info,
-                                                      const FragmentRuntimeInfo& fs_info);
+                                                      const HwFragmentRuntimeInfo& fs_info);
 
 } // namespace Shader::Backend::SPIRV

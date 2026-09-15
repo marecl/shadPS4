@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/assert.h"
@@ -6,10 +6,9 @@
 #include "core/libraries/videoout/buffer.h"
 #include "shader_recompiler/resource.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/texture_cache/host_compatibility.h"
 #include "video_core/texture_cache/image_info.h"
 #include "video_core/texture_cache/tile.h"
-
-#include <magic_enum/magic_enum.hpp>
 
 namespace VideoCore {
 
@@ -146,8 +145,9 @@ ImageInfo::ImageInfo(const AmdGpu::Image& image, const Shader::ImageResource& de
 }
 
 bool ImageInfo::IsCompatible(const ImageInfo& info) const {
-    return (pixel_format == info.pixel_format && num_samples == info.num_samples &&
-            num_bits == info.num_bits);
+    return (IsVulkanFormatCompatible(pixel_format, info.pixel_format) ||
+            IsVulkanFormatCompatible(info.pixel_format, pixel_format)) &&
+           num_samples == info.num_samples && num_bits == info.num_bits;
 }
 
 void ImageInfo::UpdateSize() {
@@ -162,7 +162,6 @@ void ImageInfo::UpdateSize() {
         mip_w = std::max(mip_w, 1u);
         mip_h = std::max(mip_h, 1u);
         u32 mip_d = std::max(size.depth >> mip, 1u);
-        u32 thickness = 1;
 
         if (props.is_pow2) {
             mip_w = std::bit_ceil(mip_w);
@@ -171,34 +170,25 @@ void ImageInfo::UpdateSize() {
         }
 
         auto& mip_info = mips_layout[mip];
-        switch (array_mode) {
-        case AmdGpu::ArrayMode::ArrayLinearAligned: {
+        if (array_mode == AmdGpu::ArrayMode::ArrayLinearAligned) {
             std::tie(mip_info.pitch, mip_info.height, mip_info.size) =
                 ImageSizeLinearAligned(mip_w, mip_h, num_bits, num_samples);
-            break;
-        }
-        case AmdGpu::ArrayMode::Array1DTiledThick:
-            thickness = 4;
+        } else if (array_mode == AmdGpu::ArrayMode::ArrayLinearGeneral) {
+            UNREACHABLE_MSG("Unhandled array mode: ArrayLinearGeneral");
+        } else {
+            // Every tiled array mode (1D/2D/3D, thin/thick/xthick, PRT or not) groups
+            // GetMicroTileThickness() consecutive depth slices per tile; round mip_d up
+            // to a full group so it's counted correctly in mip_info.size below.
+            const u32 thickness = AmdGpu::GetMicroTileThickness(array_mode);
             mip_d += (-mip_d) & (thickness - 1);
-            [[fallthrough]];
-        case AmdGpu::ArrayMode::Array1DTiledThin1: {
-            std::tie(mip_info.pitch, mip_info.height, mip_info.size) =
-                ImageSizeMicroTiled(mip_w, mip_h, thickness, num_bits, num_samples);
-            break;
-        }
-        case AmdGpu::ArrayMode::Array2DTiledThick:
-            thickness = 4;
-            mip_d += (-mip_d) & (thickness - 1);
-            [[fallthrough]];
-        case AmdGpu::ArrayMode::Array2DTiledThin1: {
-            ASSERT(!props.is_block);
-            std::tie(mip_info.pitch, mip_info.height, mip_info.size) = ImageSizeMacroTiled(
-                mip_w, mip_h, thickness, num_bits, num_samples, tile_mode, mip, alt_tile);
-            break;
-        }
-        default: {
-            UNREACHABLE_MSG("Unknown array mode {}", magic_enum::enum_name(array_mode));
-        }
+            if (AmdGpu::IsMacroTiled(array_mode)) {
+                ASSERT(!props.is_block);
+                std::tie(mip_info.pitch, mip_info.height, mip_info.size) = ImageSizeMacroTiled(
+                    mip_w, mip_h, thickness, num_bits, num_samples, tile_mode, mip, alt_tile);
+            } else {
+                std::tie(mip_info.pitch, mip_info.height, mip_info.size) =
+                    ImageSizeMicroTiled(mip_w, mip_h, thickness, num_bits, num_samples);
+            }
         }
         if (props.is_block) {
             mip_info.pitch = std::max(mip_info.pitch * 4, 32u);
@@ -219,10 +209,13 @@ s32 ImageInfo::MipOf(const ImageInfo& info) const {
         return -1;
     }
 
-    // Currently we expect only on level to be copied.
+    // Currently we expect only one level to be copied.
     if (resources.levels != 1) {
         return -1;
     }
+
+    const auto info_dim = info.props.is_block ? 2 : 0;
+    const auto this_dim = props.is_block ? 2 : 0;
 
     // Find mip
     auto mip = -1;
@@ -232,7 +225,8 @@ s32 ImageInfo::MipOf(const ImageInfo& info) const {
         const VAddr mip_end = mip_base + mip_size;
         const u32 slice_size = mip_size / info.resources.layers;
         if (guest_address >= mip_base && guest_address < mip_end &&
-            (guest_address - mip_base) % slice_size == 0) {
+            (guest_address - mip_base) % slice_size == 0 &&
+            (pitch >> this_dim) == (mip_pitch >> info_dim)) {
             mip = m;
             break;
         }
@@ -242,9 +236,12 @@ s32 ImageInfo::MipOf(const ImageInfo& info) const {
         return -1;
     }
 
-    const auto mip_w = std::max(info.size.width >> mip, 1u);
-    const auto mip_h = std::max(info.size.height >> mip, 1u);
-    if ((size.width != mip_w) || (size.height != mip_h)) {
+    // 2D block dimensions of both images should be the same.
+    const auto mip_w = std::max(info.size.width >> (mip + info_dim), 1u);
+    const auto mip_h = std::max(info.size.height >> (mip + info_dim), 1u);
+    const auto this_w = std::max(size.width >> this_dim, 1u);
+    const auto this_h = std::max(size.height >> this_dim, 1u);
+    if ((this_w != mip_w) || (this_h != mip_h)) {
         return -1;
     }
 
@@ -273,10 +270,17 @@ s32 ImageInfo::SliceOf(const ImageInfo& info, s32 mip) const {
         return -1;
     }
 
-    // 2D dimensions of both images should be the same.
-    const auto mip_w = std::max(info.size.width >> mip, 1u);
-    const auto mip_h = std::max(info.size.height >> mip, 1u);
-    if ((size.width != mip_w) || (size.height != mip_h)) {
+    // 2D block dimensions of both images should be the same.
+    const auto info_dim = info.props.is_block ? 2 : 0;
+    const auto mip_w = std::max(info.size.width >> (mip + info_dim), 1u);
+    const auto mip_h = std::max(info.size.height >> (mip + info_dim), 1u);
+    const auto mip_p = std::max(info.mips_layout[mip].pitch >> info_dim, 1u);
+
+    const auto this_dim = props.is_block ? 2 : 0;
+    const auto this_w = std::max(size.width >> this_dim, 1u);
+    const auto this_h = std::max(size.height >> this_dim, 1u);
+    const auto this_p = std::max(pitch >> this_dim, 1u);
+    if ((this_w != mip_w) || (this_h != mip_h) || (this_p != mip_p)) {
         return -1;
     }
 
