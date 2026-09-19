@@ -29,24 +29,25 @@ public:
     ~PfsDirectory() override = default;
 
     virtual s64 pread(void* buf, u64 nbytes, s64 offset) override;
-    virtual s64 lseek(s64 offset, s32 whence) override;
+    // virtual s64 lseek(s64 offset, s32 whence) override;
     virtual s32 fstat(Libraries::Kernel::OrbisKernelStat* stat) override;
     virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
 
 private:
-    [[nodiscard]] s64 nearest_dirent(const char* buffer, s64 offset);
     [[nodiscard]] s64 validate_dirent(const PfsDirectoryDirent* dirent);
     [[nodiscard]] static u8 std2pfsFileType(std::filesystem::file_type type);
     [[nodiscard]] static u8 pfs2bsdFileType(u8 type);
+    void static pfs2normal(const PfsDirectoryDirent* pfs,
+                           NormalDirectory::NormalDirectoryDirent* normal);
 
     static u32 next_fileno() {
         static u32 pool = 10;
         return ++pool;
     }
 
-    u64 suggested_file_offset{};
     static const u32 dirent_meta_size =
         sizeof(PfsDirectoryDirent::d_fileno) + sizeof(PfsDirectoryDirent::d_type) +
         sizeof(PfsDirectoryDirent::d_namlen) + sizeof(PfsDirectoryDirent::d_reclen);
 };
+
 } // namespace Core::Directories

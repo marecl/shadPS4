@@ -874,6 +874,8 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/file_sys/directories/base_directory.cpp
          src/core/file_sys/directories/base_directory.h
          src/core/file_sys/directories/cache.h
+         src/core/file_sys/directories/bitmap.cpp
+         src/core/file_sys/directories/bitmap.h
          src/core/file_sys/directories/normal_directory.cpp
          src/core/file_sys/directories/normal_directory.h
          src/core/file_sys/directories/pfs_directory.cpp

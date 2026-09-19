@@ -10,7 +10,7 @@
 
 namespace Core::Directories {
 
-BaseDirectory::BaseDirectory() {
+BaseDirectory::BaseDirectory(u32 alignment) : alignment(alignment), bmp(alignment) {
     // remember to handle adding [.] and [..] in derived classes
     this->file_offset = 0;
 };
@@ -40,9 +40,6 @@ s64 BaseDirectory::readv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iov
 }
 
 s64 BaseDirectory::preadv(const Libraries::Kernel::OrbisKernelIovec* iov, s32 iovcnt, s64 offset) {
-    if (this->file_offset >= this->directory_size)
-        return 0;
-
     const u64 old_file_pointer = file_offset;
     file_offset = offset;
     const s64 bytes_read = readv(iov, iovcnt);
@@ -69,6 +66,7 @@ s64 BaseDirectory::lseek(s64 offset, s32 whence) {
     }
 
     file_offset = offset_new;
+
     return file_offset;
 }
 
@@ -91,7 +89,7 @@ s64 BaseDirectory::validate_dirent(const BaseDirectoryDirent* dirent) {
         return -13;
     if (dirent->d_namlen == 0)
         return -14;
-    if (strnlen(dirent->d_name, 255) != dirent->d_namlen)
+    if (reinterpret_cast<const u8*>(dirent)[dirent->d_namlen] != 0)
         return -15;
 
     return 1;

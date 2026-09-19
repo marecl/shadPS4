@@ -11,13 +11,19 @@
 #include "core/file_sys/directories/pfs_directory.h"
 #include "core/file_sys/fs.h"
 
+/**
+ * TODO:
+ * on pread remember to fill zeros
+ * it uses aligned directory size
+ */
+
 namespace Core::Directories {
 
 std::shared_ptr<PfsDirectory> PfsDirectory::Create(std::string_view guest_directory) {
     return std::make_shared<PfsDirectory>(guest_directory);
 }
 
-PfsDirectory::PfsDirectory(std::string_view guest_directory) {
+PfsDirectory::PfsDirectory(std::string_view guest_directory) : BaseDirectory::BaseDirectory(8) {
     const std::filesystem::path guest_directory_path = guest_directory;
     directory_size = 0;
     suggested_file_offset = 0;
@@ -32,38 +38,35 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) {
      * getdirentries however jump straight to the next dirent i.e. there's no gap
      */
 
-    std::vector<std::pair<std::filesystem::path, u8>> file_list{};
+    std::vector<std::pair<std::string, u8>> file_list{};
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
-    mnt->IterateDirectory(guest_directory,
-                          [&file_list, this](const auto& file_path, const auto& file_type) {
-                              file_list.emplace_back(file_path, std2pfsFileType(file_type));
-                          });
+    mnt->IterateDirectory(
+        guest_directory, [&file_list, this](const auto& file_path, const auto& file_type) {
+            file_list.emplace_back(file_path.filename(), std2pfsFileType(file_type));
+        });
 
-    std::ranges::sort(file_list, std::ranges::less{}, &std::pair<std::filesystem::path, u8>::first);
-    file_list.emplace(file_list.begin(), "..",
-                      std2pfsFileType(std::filesystem::file_type::directory));
-    file_list.emplace(file_list.begin(), ".",
-                      std2pfsFileType(std::filesystem::file_type::directory));
+    // reserve some space in advance, cut down on reallocation
+    // assuming avg 32 bytes per entry, converted to n 64-bit slots
+    // 32B * x + 48B
+    this->bmp.resize(Common::AlignUpAligned(32 * file_list.size() + 48, 8));
 
-    for (const auto& [file_path, file_type] : file_list) {
-        PfsDirectoryDirent tmp{};
-
-        const auto file_leaf = file_path.filename().string();
+    // all fields are gonna be populated anyway
+    PfsDirectoryDirent tmp{};
+    for (const auto& [file_leaf, file_type] : file_list) {
 
         tmp.d_fileno = PfsDirectory::next_fileno();
+        tmp.d_type = file_type;
         tmp.d_namlen = file_leaf.size();
+        tmp.d_reclen = Common::AlignUpAligned(dirent_meta_size + tmp.d_namlen + 1, 8);
         strncpy(tmp.d_name, file_leaf.c_str(), tmp.d_namlen + 1);
 
-        tmp.d_type = file_type;
-        tmp.d_reclen = Common::AlignUp(dirent_meta_size + tmp.d_namlen + 1, 8);
+        bmp.add(dirent_cache_bin.size(), tmp.d_reclen);
         auto dirent_ptr = reinterpret_cast<const u8*>(&tmp);
-
         dirent_cache_bin.insert(dirent_cache_bin.end(), dirent_ptr, dirent_ptr + tmp.d_reclen);
-        directory_size += tmp.d_reclen;
     }
 
-    directory_size = Common::AlignUpAligned(dirent_cache_bin.size(), 0x10000);
+    directory_size = dirent_cache_bin.size();
 }
 
 s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
@@ -92,22 +95,11 @@ s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
     return data_to_write + data_to_fill;
 }
 
-s64 PfsDirectory::lseek(s64 offset, s32 whence) {
-    if (auto test = BaseDirectory::lseek(offset, whence); test < 0)
-        return test;
-
-    // refresh here, so correct offset is cached
-    // we're spending a bit more time here, but lseek() isn't called that often
-    // would be a waste if done every time getdents is called
-    this->suggested_file_offset = nearest_dirent(this->dirent_cache_bin.data(), this->file_offset);
-    return this->file_offset;
-}
-
 s32 PfsDirectory::fstat(Libraries::Kernel::OrbisKernelStat* stat) {
     stat->st_mode = 0000777u | 0040000u;
     stat->st_size = directory_size;
-    stat->st_blksize = 0x10000;
-    stat->st_blocks = 0x80;
+    stat->st_blksize = Common::AlignUpAligned(this->directory_size, 0x10000);
+    stat->st_blocks = 0x80 * (stat->st_blksize >> 16);
     return ORBIS_OK;
 }
 
@@ -137,9 +129,14 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         return 0;
     }
 
+    // check where's the nearest dirent
+    // makes most sense here
+    this->suggested_file_offset = bmp.ceil(file_offset).value_or(this->directory_size);
+    LOG_INFO(Kernel_Fs, "Bitmap hit for offset {}: {}", file_offset, this->suggested_file_offset);
+
     // we can now assume that offset is always smaller than size
     const char* dirent_buffer = this->dirent_cache_bin.data();
-    s64 allowed_count = std::min(apparent_end_down - file_offset, nbytes);
+    s64 allowed_count = std::min(apparent_end_down - file_offset, static_cast<s64>(nbytes));
     u64 bytes_written = 0;
     u64 read_offset = this->suggested_file_offset;
     u64 write_offset = 0;
@@ -147,11 +144,6 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     while (read_offset < directory_size) {
         const PfsDirectoryDirent* pfs_dirent =
             reinterpret_cast<const PfsDirectoryDirent*>(dirent_buffer + read_offset);
-
-        if (this->validate_dirent(pfs_dirent) < 0) {
-            // probably OOB
-            break;
-        }
 
         // read + reclen is an invalid break reason here
         // read and true read (dirent) are different:
@@ -166,11 +158,7 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
         // reclen for both is the same despite difference in var sizes, extra 0s are padded after
         // the name
         NormalDirectory::NormalDirectoryDirent normal_dirent{};
-        normal_dirent.d_fileno = pfs_dirent->d_fileno;
-        normal_dirent.d_reclen = pfs_dirent->d_reclen;
-        normal_dirent.d_type = pfs2bsdFileType(pfs_dirent->d_type);
-        normal_dirent.d_namlen = pfs_dirent->d_namlen;
-        memcpy(normal_dirent.d_name, pfs_dirent->d_name, pfs_dirent->d_namlen);
+        this->pfs2normal(pfs_dirent, &normal_dirent);
 
         memcpy(static_cast<u8*>(buf) + bytes_written, &normal_dirent, normal_dirent.d_reclen);
         bytes_written += normal_dirent.d_reclen;
@@ -183,32 +171,6 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
                             : (file_offset + bytes_written);
     this->suggested_file_offset = file_offset;
     return bytes_written;
-}
-
-// -1 on not found
-// this only used by getdirentries
-s64 PfsDirectory::nearest_dirent(const char* buffer, s64 offset) {
-    s64 max_advance = directory_size - offset;
-    if (max_advance < 24) {
-        // either dirent is too small or we're oob
-        return this->directory_size;
-    }
-
-    max_advance = std::min(max_advance, s64(256 + dirent_meta_size));
-
-    // there is no point in testing when offset is misaligned
-    s64 new_offset = Common::IsAligned(offset, 8) ? offset : Common::AlignUpAligned(offset, 8);
-    for (; new_offset < (offset + max_advance); new_offset += 8) {
-        const auto* tested_dirent =
-            reinterpret_cast<const PfsDirectoryDirent*>(buffer + new_offset);
-
-        if (this->validate_dirent(tested_dirent) < 0)
-            continue;
-
-        return new_offset;
-    }
-
-    return this->directory_size;
 }
 
 s64 PfsDirectory::validate_dirent(const PfsDirectoryDirent* dirent) {
@@ -228,7 +190,7 @@ s64 PfsDirectory::validate_dirent(const PfsDirectoryDirent* dirent) {
         return -13;
     if (dirent->d_namlen == 0)
         return -14;
-    if (strnlen(dirent->d_name, 255) != dirent->d_namlen)
+    if (reinterpret_cast<const u8*>(dirent)[dirent->d_namlen] != 0)
         return -15;
     return 1;
 }
@@ -258,6 +220,15 @@ u8 PfsDirectory::pfs2bsdFileType(u8 type) {
     }
     // UNREACHABLE_MSG("XD");
     return 000;
+}
+
+void PfsDirectory::pfs2normal(const PfsDirectoryDirent* pfs,
+                              NormalDirectory::NormalDirectoryDirent* normal) {
+    normal->d_fileno = pfs->d_fileno;
+    normal->d_reclen = pfs->d_reclen;
+    normal->d_type = pfs2bsdFileType(pfs->d_type);
+    normal->d_namlen = pfs->d_namlen;
+    memcpy(normal->d_name, pfs->d_name, pfs->d_namlen);
 }
 
 } // namespace Core::Directories
