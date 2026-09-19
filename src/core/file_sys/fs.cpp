@@ -414,7 +414,7 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
                 callback(hit->first, hit->second);
             }
 
-            callback(entry.name, std::filesystem::status(base_host/rel/entry.name).type());
+            callback(entry.name, std::filesystem::status(base_host / rel / entry.name).type());
         }
     }
 }
