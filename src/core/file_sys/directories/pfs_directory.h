@@ -28,10 +28,10 @@ public:
     explicit PfsDirectory(std::string_view guest_path);
     ~PfsDirectory() override = default;
 
-    virtual s64 pread(void* buf, u64 nbytes, s64 offset) override;
+    virtual s64 pread(void* buf, u64 nbytes, s64 offset) override final;
     // virtual s64 lseek(s64 offset, s32 whence) override;
-    virtual s32 fstat(Libraries::Kernel::OrbisKernelStat* stat) override;
-    virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override;
+    virtual s32 fstat(Libraries::Kernel::OrbisKernelStat* stat) override final;
+    virtual s64 getdents(void* buf, u64 nbytes, s64* basep) override final;
 
 private:
     [[nodiscard]] s64 validate_dirent(const PfsDirectoryDirent* dirent);

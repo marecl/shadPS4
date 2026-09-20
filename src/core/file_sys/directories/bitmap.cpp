@@ -42,6 +42,18 @@ void DirectoryBitmap::resize(u32 data_size) {
     bmp.resize(slots / 64, 0);
 }
 
+void DirectoryBitmap::trim(u32 allowance) {
+    // how many ull's are taken by data
+    auto units_taken = Common::AlignUpAligned(data_size / alignment, 64) >> 6;
+    // how many unused ull's we can have
+    auto units_reserved = Common::AlignUpAligned(allowance / alignment, 64) >> 6;
+
+    // it's guaranteed that alots available are equal to or greater than slots taken
+    // so we'll always be >=0
+    if ((bmp.size() - units_taken) > units_reserved)
+        bmp.resize(units_taken + units_reserved);
+}
+
 void DirectoryBitmap::clear(void) {
     this->data_size = 0;
     std::fill(bmp.begin(), bmp.end(), 0);

@@ -11,8 +11,10 @@
 namespace Core::Directories {
 
 BaseDirectory::BaseDirectory(u32 alignment) : alignment(alignment), bmp(alignment) {
-    // remember to handle adding [.] and [..] in derived classes
+    this->dirent_cache_bin.resize(512, 0);
+    this->bmp.resize(512);
     this->file_offset = 0;
+    this->directory_size = 0;
 };
 
 BaseDirectory::~BaseDirectory() = default;

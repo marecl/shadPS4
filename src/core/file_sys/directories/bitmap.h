@@ -22,6 +22,7 @@ public:
 
     void add(s64 off, u32 reclen);
     void resize(u32 data_size);
+    void trim(u32 allowance = 0);
     void clear(void);
 
     // looks up for the next entry
