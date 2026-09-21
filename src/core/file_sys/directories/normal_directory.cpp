@@ -86,11 +86,18 @@ s64 NormalDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
 
     // check where's the nearest dirent
     // makes most sense here
-    this->suggested_file_offset = bmp.ceil(file_offset).value_or(this->directory_size);
-    LOG_INFO(Kernel_Fs, "Bitmap hit for offset {}: {}", file_offset, this->suggested_file_offset);
+
+    auto suggested_file_offset = bmp.ceil(file_offset);
+    if (!suggested_file_offset) {
+        // LOG_ERROR(Kernel_Fs, "Bitmap miss for offset {}", file_offset);
+        this->file_offset = this->directory_size;
+        return 0;
+    }
+
+    // LOG_INFO(Kernel_Fs, "Bitmap hit for offset {}: {}", file_offset, *suggested_file_offset);
 
     {
-        u64 to_copy = std::min(this->suggested_file_offset - this->file_offset, allowed_count);
+        u64 to_copy = std::min(*suggested_file_offset - this->file_offset, allowed_count);
         memcpy(buf, dirent_buffer + this->file_offset, to_copy);
         read_offset += to_copy;
         bytes_written += to_copy;
@@ -122,7 +129,6 @@ s64 NormalDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     }
 
     this->file_offset += bytes_written;
-    this->suggested_file_offset = file_offset;
     return bytes_written;
 }
 
@@ -144,19 +150,8 @@ void NormalDirectory::RebuildDirents() {
             file_list.emplace_back(file_path.filename(), std2bsdFileType(file_type));
         });
 
-    // bad optimization idea:
-    // save previous sizes/amounts
-    // restore with a small+ if similiar
-    // trim everything according to calculated sizes
-
-    // reserve some space in advance, cut down on reallocation
-    // assuming avg 24 bytes per entry, converted to n 64-bit slots
-    // 24B * x + 24B
-    // this->bmp.resize(Common::AlignUpAligned(24 * file_list.size() + 24, 4));
+    // try to reuse existing space
     this->bmp.clear();
-
-    // have first sector ready
-    // dirent_cache_bin.resize(512);
     std::fill(dirent_cache_bin.begin(), dirent_cache_bin.end(), 0);
 
     // track our position
@@ -187,8 +182,9 @@ void NormalDirectory::RebuildDirents() {
         tmp.d_type = file_type;
         tmp.d_reclen = Common::AlignUpAligned(base_dirent_meta_size + tmp.d_namlen + 1, 4);
 
-        // if this breaks alignment, that means
-        if ((tmp.d_reclen + sector_bw > 512)) {
+        // current dirent breaks sector alignment, save current sector
+        // OR if it's the last one (from goto)
+        if ((tmp.d_reclen + sector_bw) > 512) {
         sector_dump_lbl:
             // align previous dirent's size to the current ceiling
             last_reclen_data_ptr = reinterpret_cast<u16*>(sector + last_reclen_offset);
@@ -196,13 +192,16 @@ void NormalDirectory::RebuildDirents() {
             *last_reclen_data_ptr += 512 - sector_bw;
             bytes_written += 512 - sector_bw;
 
-            if (dirent_cache_bin.size() < bytes_written)
-                dirent_cache_bin.resize(bytes_written, 0);
+            if (dirent_cache_bin.size() < bytes_written) {
+                // some extra won't hurt, will get trimmed anyway
+                dirent_cache_bin.resize(bytes_written + 512, 0);
+            }
             std::memcpy(dirent_cache_bin.data() + bytes_written - 512, sector, 512);
 
             // last dump, called from the label
-            if (std::next(f_iter) == file_list.end())
+            if (std::next(f_iter) == file_list.end()) {
                 continue;
+            }
 
             memset(sector, 0, 512);
             sector_bw = 0;
@@ -218,8 +217,9 @@ void NormalDirectory::RebuildDirents() {
         bytes_written += tmp.d_reclen;
 
         // awkward, but more effective than duplicate code
-        if (std::next(f_iter) == file_list.end())
+        if (std::next(f_iter) == file_list.end()) {
             goto sector_dump_lbl;
+        }
     }
 
     // already aligned to 512 bytes

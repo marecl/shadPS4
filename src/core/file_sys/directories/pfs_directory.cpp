@@ -11,12 +11,6 @@
 #include "core/file_sys/directories/pfs_directory.h"
 #include "core/file_sys/fs.h"
 
-/**
- * TODO:
- * on pread remember to fill zeros
- * it uses aligned directory size
- */
-
 namespace Core::Directories {
 
 std::shared_ptr<PfsDirectory> PfsDirectory::Create(std::string_view guest_directory) {
@@ -25,9 +19,6 @@ std::shared_ptr<PfsDirectory> PfsDirectory::Create(std::string_view guest_direct
 
 PfsDirectory::PfsDirectory(std::string_view guest_directory) : BaseDirectory::BaseDirectory(8) {
     const std::filesystem::path guest_directory_path = guest_directory;
-    directory_size = 0;
-    suggested_file_offset = 0;
-    dirent_cache_bin.reserve(512);
 
     /**
      * TODO: Read divides into 64k blocks, so if the last dirent does not fit,
@@ -51,6 +42,8 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) : BaseDirectory::Ba
     // 32B * x + 48B
     this->bmp.resize(Common::AlignUpAligned(32 * file_list.size() + 48, 8));
 
+    s64 bytes_written = 0;
+
     // all fields are gonna be populated anyway
     PfsDirectoryDirent tmp{};
     for (const auto& [file_leaf, file_type] : file_list) {
@@ -61,12 +54,26 @@ PfsDirectory::PfsDirectory(std::string_view guest_directory) : BaseDirectory::Ba
         tmp.d_reclen = Common::AlignUpAligned(dirent_meta_size + tmp.d_namlen + 1, 8);
         strncpy(tmp.d_name, file_leaf.c_str(), tmp.d_namlen + 1);
 
-        bmp.add(dirent_cache_bin.size(), tmp.d_reclen);
+        // directory size takes up another 64kb
+        if (Common::AlignUpAligned(bytes_written + tmp.d_reclen, 0x10000) >
+            Common::AlignUpAligned(dirent_cache_bin.size(), 0x10000)) {
+            bytes_written = Common::AlignUpAligned(bytes_written, 0x10000);
+            dirent_cache_bin.resize(bytes_written + 512, 0);
+        }
+
+        if ((bytes_written + tmp.d_reclen) > dirent_cache_bin.size()) {
+            // some extra won't hurt, will get trimmed anyway
+            dirent_cache_bin.resize(bytes_written + 512, 0);
+        }
+
         auto dirent_ptr = reinterpret_cast<const u8*>(&tmp);
-        dirent_cache_bin.insert(dirent_cache_bin.end(), dirent_ptr, dirent_ptr + tmp.d_reclen);
+        std::memcpy(dirent_cache_bin.data() + bytes_written, dirent_ptr, tmp.d_reclen);
+        bmp.add(bytes_written, tmp.d_reclen);
+        bytes_written += tmp.d_reclen;
     }
 
-    directory_size = dirent_cache_bin.size();
+    dirent_cache_bin.resize(bytes_written);
+    directory_size = Common::AlignUpAligned(bytes_written, 0x10000);
 }
 
 s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
@@ -98,7 +105,7 @@ s64 PfsDirectory::pread(void* buf, u64 nbytes, s64 offset) {
 s32 PfsDirectory::fstat(Libraries::Kernel::OrbisKernelStat* stat) {
     stat->st_mode = 0000777u | 0040000u;
     stat->st_size = directory_size;
-    stat->st_blksize = Common::AlignUpAligned(this->directory_size, 0x10000);
+    stat->st_blksize = directory_size;
     stat->st_blocks = 0x80 * (stat->st_blksize >> 16);
     return ORBIS_OK;
 }
@@ -122,28 +129,29 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     if (nullptr != basep)
         *basep = file_offset;
 
-    if (this->file_offset >= this->dirent_cache_bin.size()) {
-        // oob
-        this->file_offset = this->directory_size;
-        this->suggested_file_offset = this->directory_size;
+    auto suggested_file_offset = bmp.ceil(file_offset);
+    if (!suggested_file_offset) {
+        // LOG_ERROR(Kernel_Fs, "Bitmap miss for offset {}", file_offset);
+        this->file_offset = this->dirent_cache_bin.size();
         return 0;
     }
 
-    // check where's the nearest dirent
-    // makes most sense here
-    this->suggested_file_offset = bmp.ceil(file_offset).value_or(this->directory_size);
-    LOG_INFO(Kernel_Fs, "Bitmap hit for offset {}: {}", file_offset, this->suggested_file_offset);
+    // LOG_INFO(Kernel_Fs, "Bitmap hit for offset {}: {}", file_offset,
+    // *suggested_file_offset);
 
     // we can now assume that offset is always smaller than size
     const char* dirent_buffer = this->dirent_cache_bin.data();
     s64 allowed_count = std::min(apparent_end_down - file_offset, static_cast<s64>(nbytes));
     u64 bytes_written = 0;
-    u64 read_offset = this->suggested_file_offset;
+    u64 read_offset = *suggested_file_offset;
     u64 write_offset = 0;
 
-    while (read_offset < directory_size) {
+    while (read_offset < this->dirent_cache_bin.size()) {
         const PfsDirectoryDirent* pfs_dirent =
             reinterpret_cast<const PfsDirectoryDirent*>(dirent_buffer + read_offset);
+
+        if (pfs_dirent->d_reclen == 0)
+            break;
 
         // read + reclen is an invalid break reason here
         // read and true read (dirent) are different:
@@ -169,7 +177,6 @@ s64 PfsDirectory::getdents(void* buf, u64 nbytes, s64* basep) {
     this->file_offset = (read_offset >= this->dirent_cache_bin.size())
                             ? this->directory_size
                             : (file_offset + bytes_written);
-    this->suggested_file_offset = file_offset;
     return bytes_written;
 }
 

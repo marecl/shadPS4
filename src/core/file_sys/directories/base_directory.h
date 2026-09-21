@@ -46,8 +46,6 @@ protected:
 
     // fd offset
     s64 file_offset{0};
-    // nearest dirent
-    s64 suggested_file_offset{};
     // packed data in bytes
     s64 directory_size{0};
     // packed preprocessed dirents
